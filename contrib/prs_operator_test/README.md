@@ -40,20 +40,25 @@ symmetry/definiteness checks still run.
     mpif90 -O2 -fallow-argument-mismatch -I<prefix>/include/neko \
         -o assemble assemble.f90 -L<prefix>/lib -lneko -ljsonfortran -llapack -lblas
 
-    ./mkmesh.sh                  # writes box_channel.nmsh and box_outflow.nmsh
-    ./assemble channel.case      # periodic x,z + no-slip walls -> pure Neumann
+    ./mkmesh.sh                   # writes the three meshes
+    ./assemble channel.case       # case A: periodic x,z + no-slip walls -> pure Neumann
     python3 analyze.py           # symmetry, spectrum, null space
     python3 sep.py               # A vs Kx(x)My(x)Mz + Mx(x)Ky(x)Mz + Mx(x)My(x)Kz
     python3 fd.py                # direct fast-diagonalisation solve vs Neko's KSP
     python3 velsep.py            # velocity Helmholtz, with the real wall mask
-    python3 circulant.py         # is a uniform periodic direction FFT-diagonalisable?
+    python3 circulant.py          # is a uniform periodic direction FFT-diagonalisable?
 
-    ./assemble outflow.case      # with a Dirichlet pressure bc
-    python3 mask_analysis.py     # where the asymmetry lives
+    ./assemble channel_order7.case  # case C: order 7, matrix-free checks only
+    ./assemble outflow.case         # case B: with a Dirichlet pressure bc
+    python3 mask_analysis.py        # where the asymmetry lives
 
 ## Results
 
-Neko 1.99.9 (`ce9b260`), CPU, fp64, gfortran 13.3. Channel `2pi x 2 x pi`,
+Neko 1.99.9 (based on `ce9b260`), CPU, fp64, gfortran 13.3.
+
+### Case A -- channel, pure Neumann pressure
+
+Channel `2pi x 2 x pi`,
 periodic in x and z, no-slip walls in y. Mesh **non-uniform in x** (widths
 1.65/2.65/1.98) and tanh-stretched in y (heights ratio 8.1). Order 4 (`lx=5`),
 54 elements, 3600 unique dofs.
@@ -77,6 +82,17 @@ Operator state read from the live objects: `h1 = 1.0` everywhere (`= 1/rho`),
 i.e. symmetric positive semi-definite with a one-dimensional null space of
 constants, and exactly equal to the separable Kronecker sum.
 
+### Case C -- same geometry, larger and higher order
+
+4 x 8 x 3 elements, non-uniform in x (ratio 2.6), y ratio 14.6, order 7
+(`lx = 8`), 33516 unique dofs. Too large to assemble densely; matrix-free only:
+relative asymmetry 3.45e-16, `<v,Av>` = 2.3e+04 > 0 on every sample,
+`abs(A*1)_inf` = 1.24e-14, representative-copy discrepancy 0. The sample
+vectors are randomly seeded, so the asymmetry figure varies run to run at the
+1e-16 level.
+
+### Case A -- direct solve
+
 Direct separable (fast-diagonalisation) solve against Neko's own GMRES+hsmg,
 same operator, same manufactured right-hand side:
 
@@ -96,13 +112,19 @@ the two wall planes exactly): symmetric to 1.19e-19, strictly positive definite
 operator is block-circulant with block size `lx-1`, so an FFT across elements
 block-diagonalises it to 1.2e-16 (control: non-uniform spacing gives 1.6e-01).
 
-## Dirichlet pressure boundary condition (`outflow.case`)
+## Case B -- Dirichlet pressure boundary condition (`outflow.case`)
+
+A different mesh: 3 x 4 x 3 elements, uniform in x and z, tanh-stretched over 4
+wall-normal layers, x non-periodic with a prescribed-velocity inflow on one
+face and an `outflow` (Dirichlet pressure) on the other. 2652 unique dofs.
+
 
 `bcs_prs_projector%apply` zeroes the operator **output** only, so Neko applies
 `M*A`, not `M*A*M`:
 
 | quantity | value |
 | --- | --- |
+| total unique dofs | 2652 |
 | `max abs(A - A^T) / max abs(A)` | 2.26e-02 (not round-off) |
 | all-zero rows / all-zero columns | 204 / 0 |
 | restricted to the 2448 unmasked dofs: symmetry | 1.54e-16 |

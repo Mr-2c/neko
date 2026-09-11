@@ -36,4 +36,20 @@ genmeshbox 0 6.283185307179586 -1 1 0 3.141592653589793 3 4 3 \
     .false. .false. .true. uniform disty2.csv uniform
 mv box.nmsh box_outflow.nmsh
 
-echo "wrote box_channel.nmsh and box_outflow.nmsh"
+# Case C: larger/higher-order channel, for the matrix-free checks at order 7
+python3 - <<'PY2'
+import numpy as np
+ny, g = 8, 2.4
+eta = np.arange(ny+1)/ny
+y = np.tanh(g*(2*eta-1))/np.tanh(g)
+open('disty3.csv','w').write(','.join(f'{v:.16e}' for v in y))
+L = 2*np.pi
+h = np.array([1.0, 1.7, 2.6, 1.3]); h = h/h.sum()*L
+open('distx3.csv','w').write(','.join(f'{v:.16e}' for v in np.concatenate([[0], np.cumsum(h)])))
+print('case C y ratio', round(np.diff(y).max()/np.diff(y).min(), 2), ' x ratio', round(h.max()/h.min(), 2))
+PY2
+genmeshbox 0 6.283185307179586 -1 1 0 3.141592653589793 4 8 3 \
+    .true. .false. .true. distx3.csv disty3.csv uniform
+mv box.nmsh box_channel_hi.nmsh
+
+echo "wrote box_channel.nmsh, box_outflow.nmsh and box_channel_hi.nmsh"
