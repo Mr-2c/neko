@@ -2409,3 +2409,13 @@ module sits below the profiler in the dependency graph), so their cost falls
 into the self time of the enclosing solver. On the device backends they
 appear as the `Dot_product`, `Dot_product_many` and `MPI_allreduce`
 regions.
+
+One call count is backend-dependent and worth knowing about before reading
+too much into it. Almost every region is entered a number of times that is
+set by the algorithm alone -- the solver iterations, the smoother sweeps,
+the multigrid levels -- and is independent of how many elements the rank
+owns. The exception is the dealiased advection: the device backends
+interpolate and take the gradient over the whole local mesh in one call,
+whereas the generic CPU backend loops over the elements, so on that backend
+`Interpolate` and `Opgrad` are entered `6 * nelv` and `3 * nelv` times per
+step instead of 6 and 3, and their `us/call` is a per-element figure.

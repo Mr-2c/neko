@@ -14,6 +14,13 @@ tensor-product intermediates in registers or shared memory. They are meant
 for deciding whether a region is close to a hardware limit, not for
 reporting a peak.
 
+The models also assume that one entry into a region covers the whole local
+mesh, which is what the device backends do. The generic CPU backend runs the
+dealiased advection one element at a time, so profiling that backend needs
+``--per-element Opgrad,Interpolate``; without it those two regions are
+credited with a whole mesh per call and their rates come out a factor of
+``elements / rank`` too high.
+
 Usage:
 
     neko_profile_report.py profile_summary.csv --lx 8 --elements 216000 \\
@@ -120,7 +127,8 @@ COST_MODELS = {
 }
 
 
-def classify(row, lx, nelv, peak_bw, peak_flops, launch_us):
+def classify(row, lx, nelv, peak_bw, peak_flops, launch_us,
+             per_element_regions=frozenset()):
     """Return (verdict, detail) for one region."""
     name = row["region"]
     calls = float(row["calls"])
@@ -145,7 +153,10 @@ def classify(row, lx, nelv, peak_bw, peak_flops, launch_us):
             return "latency?", "%.1f us/call, at launch-overhead scale" % us_per_call
         return "unmodelled", "%.1f us/call" % us_per_call
 
-    nbytes, flops = model(lx, nelv)
+    # A region named by --per-element is entered once per element rather
+    # than once per local mesh, so model a single element instead.
+    per_element = name in per_element_regions
+    nbytes, flops = model(lx, 1 if per_element else nelv)
     # Rates are taken against the self time: a modelled region that also
     # contains a gather-scatter or a reduction should not be credited with
     # the time its children spent.
@@ -161,16 +172,20 @@ def classify(row, lx, nelv, peak_bw, peak_flops, launch_us):
     frac_bw = gbs / peak_bw
     frac_flops = gflops / peak_flops
 
-    detail = "%.0f GB/s (%.0f%% peak), %.0f GFLOP/s (%.0f%% peak), AI %.2f" % (
+    detail = "%.4g GB/s (%.1f%% peak), %.4g GFLOP/s (%.1f%% peak), AI %.2f%s" % (
         gbs,
         100 * frac_bw,
         gflops,
         100 * frac_flops,
         intensity,
+        " [per-element calls]" if per_element else "",
     )
 
     if max(frac_bw, frac_flops) > 1.05:
-        return "model/peak mismatch", detail + " -- check --lx, --elements and the peaks"
+        return "model/peak mismatch", detail + (
+            " -- above peak, so one call does not cover the whole local mesh"
+            " (the CPU dealiasing loops per element) or --lx/--elements/the"
+            " peaks are wrong")
     if us_per_call < launch_us and max(frac_bw, frac_flops) < 0.2:
         return "latency", detail
     if frac_bw >= 0.5:
@@ -201,7 +216,19 @@ def main(argv=None):
                          "faster than this are latency limited")
     ap.add_argument("--top", type=int, default=0,
                     help="only show the N regions with the largest self time")
+    ap.add_argument("--per-element", default="",
+                    help="comma-separated regions that are entered once per "
+                         "element rather than once per local mesh. The "
+                         "generic CPU backend needs "
+                         "--per-element Opgrad,Interpolate; the device "
+                         "backends need nothing")
     args = ap.parse_args(argv)
+
+    per_element = frozenset(r.strip() for r in args.per_element.split(",")
+                            if r.strip())
+    unknown = per_element - set(COST_MODELS)
+    if unknown:
+        ap.error("no cost model for %s" % ", ".join(sorted(unknown)))
 
     nelv = args.elements / args.ranks
     if nelv < 1:
@@ -235,7 +262,8 @@ def main(argv=None):
 
     for r in rows:
         verdict, detail = classify(r, args.lx, nelv, args.peak_bandwidth,
-                                   args.peak_flops, args.launch_overhead)
+                                   args.peak_flops, args.launch_overhead,
+                                   per_element)
         print("%-26s %8.2f %7.0f %9.1f  %-28s %s" % (
             r["region"][:26],
             float(r["self_percent"]),
@@ -249,7 +277,8 @@ def main(argv=None):
     groups = {}
     for r in rows:
         verdict, _ = classify(r, args.lx, nelv, args.peak_bandwidth,
-                              args.peak_flops, args.launch_overhead)
+                              args.peak_flops, args.launch_overhead,
+                              per_element)
         if verdict == "container":
             continue
         key = verdict.split(" (")[0]
