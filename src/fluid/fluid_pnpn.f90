@@ -53,7 +53,8 @@ module fluid_pnpn
   use device, only : device_memcpy, HOST_TO_DEVICE, device_event_sync, &
        glb_cmd_event
   use advection, only : advection_t, advection_factory
-  use profiler, only : profiler_start_region, profiler_end_region
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   use json_module, only : json_file, json_core, json_value
   use json_utils, only : json_get, json_get_or_default, json_extract_item, &
        json_get_or_lookup, json_get_or_lookup_or_default
@@ -731,11 +732,13 @@ contains
            ulag, vlag, wlag, ext_bdf%advection_coeffs%x, ext_bdf%nadv)
 
       ! Compute the source terms
+      call profiler_start_region('Fluid_source_terms', 25, RT_LVL_SOLVER)
       call this%source_term%compute(time)
 
       ! Add Neumann bc contributions to the RHS
       call this%bcs_vel%apply_vector(f_x%x, f_y%x, f_z%x, &
            this%dm_Xh%size(), time, strong = .false.)
+      call profiler_end_region('Fluid_source_terms', 25, RT_LVL_SOLVER)
 
       if (this%ale%active) then
          if (oifs) then
@@ -743,18 +746,22 @@ contains
                  "with OIFS time integration.")
          end if
          !> adds div.(u_i*wm) to RHS
+         call profiler_start_region('Advection', 24)
          call this%adv%compute_ale(u, v, w, &
               ale%wm_x, ale%wm_y, ale%wm_z, &
               f_x, f_y, f_z, &
               Xh, c_Xh, dm_Xh%size())
+         call profiler_end_region('Advection', 24)
       end if
 
 
       if (oifs) then
          ! Add the advection operators to the right-hand-side.
+         call profiler_start_region('Advection', 24)
          call this%adv%compute(u, v, w, &
               this%advx, this%advy, this%advz, &
               Xh, this%c_Xh, dm_Xh%size(), real(dt, kind=rp))
+         call profiler_end_region('Advection', 24)
 
          ! At this point the RHS contains the sum of the advection operator and
          ! additional source terms, evaluated using the velocity field from the
@@ -773,9 +780,11 @@ contains
               rho%x(1,1,1,1), real(dt, kind=rp), n)
       else
          ! Add the advection operators to the right-hand-side.
+         call profiler_start_region('Advection', 24)
          call this%adv%compute(u, v, w, &
               f_x, f_y, f_z, &
               Xh, this%c_Xh, dm_Xh%size())
+         call profiler_end_region('Advection', 24)
 
          ! At this point the RHS contains the sum of the advection operator and
          ! additional source terms, evaluated using the velocity field from the
@@ -828,8 +837,10 @@ contains
 
       do iter = 1, 1 + this%schwarz_iterations
 
+         call profiler_start_region('Fluid_bc_apply', 26, RT_LVL_SOLVER)
          call this%bc_apply_vel(time, strong = .true.)
          call this%bc_apply_prs(time)
+         call profiler_end_region('Fluid_bc_apply', 26, RT_LVL_SOLVER)
 
          ! Compute pressure residual.
          call profiler_start_region('Pressure_residual', 18)
@@ -867,7 +878,9 @@ contains
                  bclst = this%bcs_prs_projector, string = 'Pressure')
          end if
 
+         call profiler_start_region('Pressure_pc_update', 44, RT_LVL_SOLVER)
          call this%pc_prs%update()
+         call profiler_end_region('Pressure_pc_update', 44, RT_LVL_SOLVER)
 
          call profiler_start_region('Pressure_solve', 3)
 
@@ -921,7 +934,9 @@ contains
                  tstep, c_Xh, n, dt_controller, 'Velocity')
          end if
 
+         call profiler_start_region('Velocity_pc_update', 45, RT_LVL_SOLVER)
          call this%pc_vel%update()
+         call profiler_end_region('Velocity_pc_update', 45, RT_LVL_SOLVER)
 
          call profiler_start_region("Velocity_solve", 4)
          ksp_results(2:4) = this%ksp_vel%solve_coupled(Ax_vel, du, dv, dw, &

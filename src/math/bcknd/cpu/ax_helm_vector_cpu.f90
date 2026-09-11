@@ -62,6 +62,8 @@ contains
     real(kind=rp), intent(in) :: w(Xh%lx, Xh%ly, Xh%lz, msh%nelv)
     integer :: i
 
+    call profiler_start_region('Ax_helm_vector', 28, RT_LVL_KERNEL)
+
     !$omp parallel
     select case(Xh%lx)
     case (14)
@@ -135,6 +137,8 @@ contains
        !$omp end do
     end if
     !$omp end parallel
+
+    call profiler_end_region('Ax_helm_vector', 28, RT_LVL_KERNEL)
 
   end subroutine ax_helm_compute_vector
 

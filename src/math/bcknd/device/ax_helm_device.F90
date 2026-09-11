@@ -38,6 +38,8 @@ module ax_helm_device
   use mesh, only : mesh_t
   use device_math, only : device_addcol4
   use device, only : device_get_ptr
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_KERNEL
   use num_types, only : rp
   use, intrinsic :: iso_c_binding, only : c_ptr, c_int
   implicit none
@@ -222,6 +224,8 @@ contains
     real(kind=rp), intent(in) :: u(Xh%lx, Xh%ly, Xh%lz, msh%nelv)
     type(c_ptr) :: u_d, w_d
 
+    call profiler_start_region('Ax_helm', 27, RT_LVL_KERNEL)
+
     u_d = device_get_ptr(u)
     w_d = device_get_ptr(w)
 
@@ -255,6 +259,8 @@ contains
        call device_addcol4(w_d ,coef%h2_d, coef%B_d, u_d, coef%dof%size())
     end if
 
+    call profiler_end_region('Ax_helm', 27, RT_LVL_KERNEL)
+
   end subroutine ax_helm_device_compute
 
   subroutine ax_helm_device_compute_vector(this, au, av, aw, &
@@ -271,6 +277,8 @@ contains
     real(kind=rp), intent(in) :: w(Xh%lx, Xh%ly, Xh%lz, msh%nelv)
     type(c_ptr) :: u_d, v_d, w_d
     type(c_ptr) :: au_d, av_d, aw_d
+
+    call profiler_start_region('Ax_helm_vector', 28, RT_LVL_KERNEL)
 
     u_d = device_get_ptr(u)
     v_d = device_get_ptr(v)
@@ -322,6 +330,8 @@ contains
        call device_addcol4(aw_d ,coef%h2_d, coef%B_d, w_d, coef%dof%size())
 #endif
     end if
+
+    call profiler_end_region('Ax_helm_vector', 28, RT_LVL_KERNEL)
 
   end subroutine ax_helm_device_compute_vector
 

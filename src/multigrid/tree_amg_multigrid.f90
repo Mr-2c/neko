@@ -59,7 +59,8 @@ module tree_amg_multigrid
   use tree_amg_aggregate, only : aggregate_finest_level, aggregate_greedy, &
        aggregate_end, aggregate_pairs
   use tree_amg_smoother, only : amg_cheby_t
-  use profiler, only : profiler_start_region, profiler_end_region
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   use logger, only : neko_log, LOG_SIZE
   use device, only : device_map, device_unmap, device_memcpy, HOST_TO_DEVICE, &
        device_get_ptr
@@ -367,18 +368,24 @@ contains
          !!----------!!
          !! SMOOTH   !!
          !!----------!!
+         call profiler_start_region('AMG_smoother', 39, RT_LVL_SOLVER)
          call this%smoo(lvl)%solve(x, b, n, this%amg, &
               zero_initial_guess)
+         call profiler_end_region('AMG_smoother', 39, RT_LVL_SOLVER)
          !!----------!!
          !! Residual !!
          !!----------!!
+         call profiler_start_region('AMG_matvec', 40, RT_LVL_SOLVER)
          call calc_resid(r, x, b, this%amg, lvl, n)
+         call profiler_end_region('AMG_matvec', 40, RT_LVL_SOLVER)
          !!----------!!
          !! Restrict !!
          !!----------!!
+         call profiler_start_region('AMG_interp', 41, RT_LVL_SOLVER)
          call this%amg%interp_f2c(this%wrk(lvl+1)%b, r, lvl+1)
 
          call rzero(this%wrk(lvl+1)%x, this%wrk(lvl+1)%n)
+         call profiler_end_region('AMG_interp', 41, RT_LVL_SOLVER)
          zero_initial_guess = .true.
        end associate
        call profiler_end_region( "AMG_level_" // trim(lvl_name))
@@ -388,9 +395,11 @@ contains
     !!-------------------!!
     !! Call Coarse solve !!
     !!-------------------!!
+    call profiler_start_region('AMG_coarse_solve', 42, RT_LVL_SOLVER)
     call this%smoo(max_lvl)%solve(this%wrk(max_lvl)%x, &
          this%wrk(max_lvl)%b, this%amg%lvl(max_lvl)%nnodes, this%amg, &
          zero_initial_guess)
+    call profiler_end_region('AMG_coarse_solve', 42, RT_LVL_SOLVER)
     call profiler_end_region( "AMG_level_" // trim(lvl_name))
 
     zero_initial_guess = .false.
@@ -403,15 +412,19 @@ contains
          !!----------!!
          !! Project  !!
          !!----------!!
+         call profiler_start_region('AMG_interp', 41, RT_LVL_SOLVER)
          call this%amg%interp_c2f(r, this%wrk(lvl+1)%x, lvl+1)
          !!----------!!
          !! Correct  !!
          !!----------!!
          call add2(x, r, n)
+         call profiler_end_region('AMG_interp', 41, RT_LVL_SOLVER)
          !!----------!!
          !! SMOOTH   !!
          !!----------!!
+         call profiler_start_region('AMG_smoother', 39, RT_LVL_SOLVER)
          call this%smoo(lvl)%solve(x, b, n, this%amg)
+         call profiler_end_region('AMG_smoother', 39, RT_LVL_SOLVER)
        end associate
        call profiler_end_region( "AMG_level_" // trim(lvl_name))
     end do
@@ -438,19 +451,25 @@ contains
          !!----------!!
          !! SMOOTH   !!
          !!----------!!
+         call profiler_start_region('AMG_smoother', 39, RT_LVL_SOLVER)
          call this%smoo(lvl)%device_solve(x, b, x_d, b_d, n, this%amg, &
               zero_initial_guess)
+         call profiler_end_region('AMG_smoother', 39, RT_LVL_SOLVER)
          !!----------!!
          !! Residual !!
          !!----------!!
+         call profiler_start_region('AMG_matvec', 40, RT_LVL_SOLVER)
          call this%amg%device_matvec(r, x, r_d, x_d, lvl)
          call device_sub3(r_d, b_d, r_d, n)
+         call profiler_end_region('AMG_matvec', 40, RT_LVL_SOLVER)
          !!----------!!
          !! Restrict !!
          !!----------!!
+         call profiler_start_region('AMG_interp', 41, RT_LVL_SOLVER)
          call this%amg%interp_f2c_d(this%wrk(lvl+1)%b_d, r_d, lvl+1)
 
          call device_rzero(this%wrk(lvl+1)%x_d, this%wrk(lvl+1)%n)
+         call profiler_end_region('AMG_interp', 41, RT_LVL_SOLVER)
          zero_initial_guess = .true.
        end associate
        call profiler_end_region( "AMG_level_" // trim(lvl_name))
@@ -460,11 +479,13 @@ contains
     !!-------------------!!
     !! Call Coarse solve !!
     !!-------------------!!
+    call profiler_start_region('AMG_coarse_solve', 42, RT_LVL_SOLVER)
     call this%smoo(max_lvl)%device_solve( &
          this%wrk(max_lvl)%x, this%wrk(max_lvl)%b, &
          this%wrk(max_lvl)%x_d, this%wrk(max_lvl)%b_d, &
          this%amg%lvl(max_lvl)%nnodes, this%amg, &
          zero_initial_guess)
+    call profiler_end_region('AMG_coarse_solve', 42, RT_LVL_SOLVER)
     call profiler_end_region( "AMG_level_" // trim(lvl_name))
 
     zero_initial_guess = .false.
@@ -479,15 +500,19 @@ contains
          !!----------!!
          !! Project  !!
          !!----------!!
+         call profiler_start_region('AMG_interp', 41, RT_LVL_SOLVER)
          call this%amg%interp_c2f_d(r_d, this%wrk(lvl+1)%x_d, lvl+1, r)
          !!----------!!
          !! Correct  !!
          !!----------!!
          call device_add2(x_d, r_d, n)
+         call profiler_end_region('AMG_interp', 41, RT_LVL_SOLVER)
          !!----------!!
          !! SMOOTH   !!
          !!----------!!
+         call profiler_start_region('AMG_smoother', 39, RT_LVL_SOLVER)
          call this%smoo(lvl)%device_solve(x, b, x_d, b_d, n, this%amg)
+         call profiler_end_region('AMG_smoother', 39, RT_LVL_SOLVER)
        end associate
        call profiler_end_region( "AMG_level_" // trim(lvl_name))
     end do

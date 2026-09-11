@@ -53,6 +53,8 @@ module gmres_device
        device_event_create, device_unmap, device_free, device_event_destroy, &
        device_get_ptr, device_event_sync
   use utils, only : neko_error
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER, RT_LVL_KERNEL
   use comm, only : NEKO_COMM, pe_size, MPI_REAL_PRECISION
   use mpi_f08, only : MPI_IN_PLACE, MPI_SUM, MPI_Allreduce
   use, intrinsic :: iso_c_binding, only : c_ptr, C_NULL_PTR, c_loc, &
@@ -396,13 +398,16 @@ contains
          do j = 1, this%m_restart
             iter = iter+1
 
+            call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
             call this%M%solve(z(1,j), v(1,j), n)
+            call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
 
             call Ax%compute(w, z(1,j), coef, x%msh, x%Xh)
             call gs_h%op(w, n, GS_OP_ADD, this%gs_event)
             call device_event_sync(this%gs_event)
             call bc_projector%apply(w, n)
 
+            call profiler_start_region('Krylov_ortho', 32, RT_LVL_SOLVER)
             if (NEKO_BCKND_OPENCL .eq. 1 .or. NEKO_BCKND_METAL .eq. 1) then
                do i = 1, j
                   h(i,j) = device_glsc3(w_d, v_d(i), coef%mult_d, n)
@@ -421,6 +426,7 @@ contains
                     coef%mult_d, j, n)
 
             end if
+            call profiler_end_region('Krylov_ortho', 32, RT_LVL_SOLVER)
 
             alpha = sqrt(alpha2)
             do i = 1, j-1
@@ -470,6 +476,7 @@ contains
             c(k) = temp / h(k,k)
          end do
 
+         call profiler_start_region('Krylov_update', 43, RT_LVL_KERNEL)
          if (NEKO_BCKND_OPENCL .eq. 1 .or. NEKO_BCKND_METAL .eq. 1) then
             do i = 1, j
                call device_add2s2(x_d, this%z_d(i), c(i), n)
@@ -478,6 +485,7 @@ contains
             call device_memcpy(c, c_d, j, HOST_TO_DEVICE, sync = .false.)
             call device_add2s2_many(x_d, z_d_d, c_d, j, n)
          end if
+         call profiler_end_region('Krylov_update', 43, RT_LVL_KERNEL)
       end do
 
     end associate

@@ -68,6 +68,8 @@ module operators
        MPI_DOUBLE_PRECISION
   use, intrinsic :: iso_c_binding, only : c_ptr
   use logger, only : neko_log
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_KERNEL
   implicit none
   private
 
@@ -315,6 +317,8 @@ contains
     integer :: eblk_start, eblk_end
     type(c_ptr) :: ux_d, uy_d, uz_d, u_d
 
+    call profiler_start_region('Opgrad', 46, RT_LVL_KERNEL)
+
     if (present(es)) then
        eblk_start = es
     else
@@ -340,6 +344,8 @@ contains
     else
        call opr_cpu_opgrad(ux, uy, uz, u, coef, eblk_start, eblk_end)
     end if
+
+    call profiler_end_region('Opgrad', 46, RT_LVL_KERNEL)
 
   end subroutine opgrad
 
@@ -390,6 +396,8 @@ contains
     integer :: eblk_start, eblk_end
     type(c_ptr) :: dtx_d, x_d, dr_d, ds_d, dt_d
 
+    call profiler_start_region('Cdtp', 47, RT_LVL_KERNEL)
+
     if (present(es)) then
        eblk_start = es
     else
@@ -417,6 +425,8 @@ contains
        call opr_cpu_cdtp(dtx, x, dr, ds, dt, coef, eblk_start, eblk_end)
     end if
 
+    call profiler_end_region('Cdtp', 47, RT_LVL_KERNEL)
+
   end subroutine cdtp
 
   !> Compute the advection term.
@@ -440,6 +450,8 @@ contains
     integer, optional :: es, ee
     integer :: eblk_end, eblk_start
     type(c_ptr) :: du_d, u_d, vx_d, vy_d, vz_d
+
+    call profiler_start_region('Conv1', 48, RT_LVL_KERNEL)
 
     associate(nelv => coef%msh%nelv, gdim => coef%msh%gdim)
       if (present(es)) then
@@ -469,6 +481,8 @@ contains
          call opr_cpu_conv1(du, u, vx, vy, vz, Xh, coef, eblk_start, eblk_end)
       end if
     end associate
+
+    call profiler_end_region('Conv1', 48, RT_LVL_KERNEL)
 
   end subroutine conv1
 
@@ -542,6 +556,8 @@ contains
     type(coef_t), intent(in) :: coef
     type(c_ptr), optional, intent(inout) :: event
 
+    call profiler_start_region('Curl', 49, RT_LVL_KERNEL)
+
     if (NEKO_BCKND_SX .eq. 1) then
        call opr_sx_curl(w1%x, w2%x, w3%x, u1%x, u2%x, u3%x, &
             work1%x, work2%x, coef)
@@ -555,6 +571,8 @@ contains
        call opr_cpu_curl(w1%x, w2%x, w3%x, u1%x, u2%x, u3%x, &
             work1%x, work2%x, coef)
     end if
+
+    call profiler_end_region('Curl', 49, RT_LVL_KERNEL)
 
   end subroutine curl
 

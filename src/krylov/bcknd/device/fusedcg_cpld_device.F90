@@ -48,6 +48,8 @@ module fusedcg_cpld_device
        device_event_create, device_unmap, device_free, device_event_destroy, &
        device_get_ptr, device_event_sync
   use utils, only : neko_error
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER, RT_LVL_KERNEL
   use comm, only : NEKO_COMM, pe_size, MPI_REAL_PRECISION
   use mpi_f08, only : MPI_IN_PLACE, MPI_Allreduce, &
        MPI_SUM
@@ -608,9 +610,11 @@ contains
       end if
       call this%monitor_start('fcpldCG')
       do iter = 1, max_iter
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(z1, r1, n)
          call this%M%solve(z2, r2, n)
          call this%M%solve(z3, r3, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          rtz2 = rtz1
          call device_fusedcg_cpld_part1(z1_d, z2_d, z3_d, &
               r1_d, r2_d, r3_d, tmp_d, n)
@@ -619,8 +623,10 @@ contains
          beta = rtz1 / rtz2
          if (iter .eq. 1) beta = 0.0_rp
 
+         call profiler_start_region('Krylov_update', 43, RT_LVL_KERNEL)
          call device_fusedcg_cpld_update_p(p1_d(p_cur), p2_d(p_cur), p3_d(p_cur), &
               z1_d, z2_d, z3_d, p1_d(p_prev), p2_d(p_prev), p3_d(p_prev), beta, n)
+         call profiler_end_region('Krylov_update', 43, RT_LVL_KERNEL)
 
          call Ax%compute_vector(w1, w2, w3, &
               p1(1, p_cur), p2(1, p_cur), p3(1, p_cur), coef, x%msh, x%Xh)
@@ -643,8 +649,10 @@ contains
          call this%monitor_iter(iter, rnorm)
          if ((p_cur .eq. DEVICE_FUSEDCG_CPLD_P_SPACE) .or. &
               (rnorm .lt. this%abs_tol) .or. iter .eq. max_iter) then
+            call profiler_start_region('Krylov_update', 43, RT_LVL_KERNEL)
             call device_fusedcg_cpld_update_x(x%x_d, y%x_d, z%x_d, &
                  p1_d_d, p2_d_d, p3_d_d, alpha_d, p_cur, n)
+            call profiler_end_region('Krylov_update', 43, RT_LVL_KERNEL)
             p_prev = p_cur
             p_cur = 1
             if (rnorm .lt. this%abs_tol) exit

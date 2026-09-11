@@ -42,6 +42,7 @@ module simulation
   use jobctrl, only : jobctrl_time_limit
   use profiler, only : profiler_start, profiler_stop, &
        profiler_start_region, profiler_end_region
+  use runtime_stats, only : RT_STATS_REGION_TIMESTEP
   use simcomp_executor, only : neko_simcomps
   use json_utils, only : json_get, json_get_or_default
   use time_state, only : time_state_t
@@ -127,7 +128,7 @@ contains
     character(len=LOG_SIZE) :: log_buf
 
     ! Setup the time step, and start time
-    call profiler_start_region('Time-Step')
+    call profiler_start_region('Time-Step', RT_STATS_REGION_TIMESTEP)
     start_time = MPI_WTIME()
     tstep_start_time = start_time
 

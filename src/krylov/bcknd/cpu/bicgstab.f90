@@ -49,6 +49,8 @@ module bicgstab
   use comm, only : NEKO_COMM, MPI_EXTRA_PRECISION
   use mpi_f08, only : MPI_Allreduce, MPI_IN_PLACE, MPI_SUM
   use, intrinsic :: ieee_arithmetic, only : ieee_is_finite
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -261,7 +263,9 @@ contains
             call p_update(p, r, v, beta, omega, n)
          end if
 
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(p_hat, p, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          call Ax%compute(v, p_hat, coef, x%msh, x%Xh)
          call gs_h%op(v, n, GS_OP_ADD)
          call bc_projector%apply(v, n)
@@ -300,7 +304,9 @@ contains
             exit
          end if
 
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(s_hat, r, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          call Ax%compute(t, s_hat, coef, x%msh, x%Xh)
          call gs_h%op(t, n, GS_OP_ADD)
          call bc_projector%apply(t, n)

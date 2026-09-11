@@ -2330,11 +2330,82 @@ A more detailed description as well as a  full list of available components and
 
 This object adds the collection of runtime statistics (timings) for identified
 profiling regions. A region is defined as all functions between a call to
-`profiler_start_region(name, id)` and `profiler_end_region(name, id)`. Neko
-currently supports 50 regions, with id 1..25 being reserved for internal use.
-
+`profiler_start_region(name, id, level)` and
+`profiler_end_region(name, id, level)`. Neko currently supports 128 regions,
+with id 1..64 being reserved for internal use.
 
 | Name             | Description                                                 | Admissible values | Default value |
 | ---------------- | ----------------------------------------------------------- | ----------------- | ------------- |
 | `enabled`        | Whether to enable gathering of runtime statistics           | `true` or `false` | `false`       |
 | `output_profile` | Whether to output all gathered profiling data as a CSV file | `true` or `false` | `false`       |
+| `detail_level`   | How deeply to instrument the time step                      | 1, 2 or 3         | 1             |
+| `sync_device`    | Synchronise the device before every timestamp               | `true` or `false` | `false`       |
+
+### Detail level
+
+Regions are declared at a detail level and are only measured when
+`detail_level` is at least that value. Raising the level costs a pair of
+timestamps per region entry, so the finest level perturbs short kernels the
+most.
+
+| Level | What is added                                                                                       |
+| ----- | --------------------------------------------------------------------------------------------------- |
+| 1     | The top-level breakdown of a time step: fluid, residuals, solves, advection, gather-scatter          |
+| 2     | Solver internals: preconditioner applications, multigrid smoothers and grid transfers, dot products, the MPI reductions inside them |
+| 3     | Individual operators: the Helmholtz operator, `opgrad`, `cdtp`, `curl`, `conv1` and the tensor-product interpolation |
+
+### Reading the report
+
+Two tables are written to the log at the end of the run, and two CSV files
+are written to the working directory.
+
+Each region gets an *inclusive* time (everything between its start and its
+end, including nested regions) and a *self* time (inclusive minus the
+inclusive time of its direct children). Nested regions overlap, so only the
+self times form a partition of the run: those are the numbers that answer
+"where does the time go". The `us/call` column is the mean inclusive time of
+a single entry into the region, which is what tells a short latency-bound
+kernel apart from a long bandwidth-bound one.
+
+When running on more than one rank a second table reports, per region, the
+time averaged over the ranks and the time on the slowest rank. A `Max/Avg`
+close to one means the region is balanced; a large value means either an
+uneven partition or that the region is absorbing the wait for a collective
+issued somewhere else.
+
+`profile_summary.csv` holds one row per region with all of the above,
+including per-time-step figures. `profile.csv`, written when
+`output_profile` is set, holds one row per time step and one column per
+region with the inclusive time of that region in that step, which separates
+a steady cost from a start-up transient such as the Chebyshev eigenvalue
+estimation.
+
+`contrib/neko_profile_report/neko_profile_report.py` reads
+`profile_summary.csv` and, given the polynomial order, the element count and
+the peak bandwidth and flop rate of the device, reports the achieved
+bandwidth and arithmetic intensity of the regions whose memory traffic and
+floating-point work are known analytically, so that each can be placed
+against the machine balance.
+
+### Accelerator backends
+
+On the device backends, kernel launches are asynchronous. A host timer
+around a region therefore measures the time spent *launching* the work, not
+the time spent executing it, and the accumulated device work is charged to
+whichever region happens to contain the next synchronising operation --
+usually a `glsc3`-style reduction, a device-to-host copy, or a
+gather-scatter. The default timings are still useful for the regions that
+end in a synchronisation, but they misattribute everything else.
+
+Setting `sync_device` to `true` synchronises the device immediately before
+each timestamp, so each region is charged with the device work it issued.
+This serialises host and device and removes any overlap between compute and
+communication, which makes the run slower than a production run: use a
+synchronised run to find out where the time goes, and an unsynchronised run
+for absolute performance numbers. The option is ignored on the CPU backend.
+
+On the CPU backend the reductions in `math` are not instrumented (that
+module sits below the profiler in the dependency graph), so their cost falls
+into the self time of the enclosing solver. On the device backends they
+appear as the `Dot_product`, `Dot_product_many` and `MPI_allreduce`
+regions.

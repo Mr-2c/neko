@@ -46,6 +46,8 @@ module cg
   use math, only : glsc3, abscmp
   use comm, only : MPI_EXTRA_PRECISION, MPI_REAL_PRECISION, NEKO_COMM
   use mpi_f08, only : MPI_Allreduce, MPI_IN_PLACE, MPI_SUM
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -192,7 +194,9 @@ contains
       p_cur = 1
       call this%monitor_start('CG')
       do iter = 1, max_iter
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(z, r, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          rtz2 = rtz1
          rtz1 = glsc3(r, coef%mult, z, n)
 

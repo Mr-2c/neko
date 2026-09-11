@@ -135,6 +135,14 @@
             },
             "output_profile": {
               "type": "boolean"
+            },
+            "detail_level": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3
+            },
+            "sync_device": {
+              "type": "boolean"
             }
           },
           "additionalProperties": false

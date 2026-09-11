@@ -54,6 +54,8 @@ module pipecg_device
        MPI_SUM, MPI_IN_PLACE, MPI_Request, MPI_Wait
   use, intrinsic :: iso_c_binding, only : c_ptr, C_NULL_PTR, &
        c_associated, c_size_t, c_sizeof, c_int, c_loc
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -396,7 +398,9 @@ contains
       call device_copy(r_d, f_d, n)
       !apply u=M^-1r
       !call device_copy(u_d(u_prev), r_d, n)
+      call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
       call this%M%solve(u(1, u_prev), r, n)
+      call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
       call Ax%compute(w, u(1, u_prev), coef, x%msh, x%Xh)
       call gs_h%op(w, n, GS_OP_ADD, this%gs_event)
       call device_event_sync(this%gs_event)
@@ -428,7 +432,9 @@ contains
          call MPI_Iallreduce(MPI_IN_PLACE, reduction, 3, &
               MPI_REAL_PRECISION, MPI_SUM, NEKO_COMM, request, ierr)
 
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(mi, w, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          call Ax%compute(ni, mi, coef, x%msh, x%Xh)
          call gs_h%op(ni, n, GS_OP_ADD, this%gs_event)
          call device_event_sync(this%gs_event)

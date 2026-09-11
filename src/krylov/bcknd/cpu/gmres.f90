@@ -47,6 +47,8 @@ module gmres
   use neko_config, only : NEKO_BLK_SIZE
   use comm, only : NEKO_COMM, MPI_EXTRA_PRECISION
   use mpi_f08, only : MPI_Allreduce, MPI_IN_PLACE, MPI_SUM
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -241,7 +243,9 @@ contains
          do j = 1, this%lgmres
             iter = iter+1
 
+            call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
             call this%M%solve(z(1,j), v(1,j), n)
+            call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
 
             call Ax%compute(w, z(1,j), coef, x%msh, x%Xh)
             call gs_h%op(w, n, GS_OP_ADD)

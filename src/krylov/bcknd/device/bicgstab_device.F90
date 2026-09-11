@@ -54,6 +54,8 @@ module bicgstab_device
   use, intrinsic :: ieee_arithmetic, only : ieee_is_finite
   use, intrinsic :: iso_c_binding, only : c_ptr, C_NULL_PTR, c_associated, &
        c_int
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -709,7 +711,9 @@ contains
             call device_bicgstab_update_p(p_d, r_d, v_d, beta, omega, n)
          end if
 
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(this%p_hat, this%p, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          call Ax%compute(this%v, this%p_hat, coef, x%msh, x%Xh)
          call gs_h%op(this%v, n, GS_OP_ADD, this%gs_event)
          call device_event_sync(this%gs_event)
@@ -738,7 +742,9 @@ contains
             exit
          end if
 
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(this%s_hat, this%s, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          call Ax%compute(this%t, this%s_hat, coef, x%msh, x%Xh)
          call gs_h%op(this%t, n, GS_OP_ADD, this%gs_event)
          call device_event_sync(this%gs_event)

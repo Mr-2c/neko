@@ -36,7 +36,8 @@ module cheby_device
   use precon, only : pc_t
   use ax_product, only : ax_t
   use num_types, only : rp, c_rp
-  use profiler, only : profiler_start_region, profiler_end_region
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   use field, only : field_t
   use coefs, only : coef_t
   use mesh, only : mesh_t
@@ -340,7 +341,9 @@ contains
             call this%schwarz%compute(this%r, w)
             call device_copy(w_d, this%r_d, n)
          else
+            call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
             call this%M%solve(this%r, w, n)
+            call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
             call device_copy(w_d, this%r_d, n)
          end if
 
@@ -356,7 +359,9 @@ contains
          call this%schwarz%compute(this%r, w)
          call device_copy(w_d, this%r_d, n)
       else
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(this%r, w, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          call device_copy(w_d, this%r_d, n)
       end if
 
@@ -428,7 +433,9 @@ contains
       ksp_results%iter = 0
 
       ! First iteration
+      call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
       call this%M%solve(w, r, n)
+      call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
       call device_copy(d_d, w_d, n)
       a = 2.0_rp / this%tha
       call device_add2s2(x%x_d, d_d, a, n)! x = x + a*d
@@ -442,7 +449,9 @@ contains
          call bc_projector%apply(w, n)
          call device_sub2(r_d, w_d, n)
 
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(w, r, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
 
          if (iter .eq. 2) then
             b = 0.5_rp * (this%dlt * a)**2
@@ -519,7 +528,9 @@ contains
       if (associated(this%schwarz)) then
          call this%schwarz%compute(d, r)
       else
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(d, r, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
       end if
 
       tmp1 = 1.0_rp / this%tha
@@ -543,7 +554,9 @@ contains
          if (associated(this%schwarz)) then
             call this%schwarz%compute(w, r)
          else
+            call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
             call this%M%solve(w, r, n)
+            call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          end if
 
          call cheby_device_part2(d_d, w_d, x%x_d, tmp1, tmp2, n)

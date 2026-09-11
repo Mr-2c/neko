@@ -50,6 +50,8 @@ module cg_cpld_device
   use utils, only : neko_error
   use operators, only : rotate_cyc
   use, intrinsic :: iso_c_binding, only : c_ptr, C_NULL_PTR, c_associated
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -359,9 +361,11 @@ contains
 
       call this%monitor_start('device_cpldCG')
       do iter = 1, max_iter
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(this%z1, this%r1, n)
          call this%M%solve(this%z2, this%r2, n)
          call this%M%solve(this%z3, this%r3, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          rtz2 = rtz1
 
          call device_vdot3(tmp_d, z1_d, z2_d, z3_d, r1_d, r2_d, r3_d, n)

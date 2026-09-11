@@ -37,14 +37,15 @@ module profiler
   use nvtx
   use roctx
   use craypat
-  use runtime_stats, only : neko_rt_stats
+  use runtime_stats, only : neko_rt_stats, RT_LVL_BASIC, RT_LVL_SOLVER, &
+       RT_LVL_KERNEL
   use, intrinsic :: iso_c_binding
   !$ use omp_lib
   implicit none
   private
 
   public :: profiler_start, profiler_start_region, profiler_end_region, &
-       profiler_stop
+       profiler_stop, RT_LVL_BASIC, RT_LVL_SOLVER, RT_LVL_KERNEL
 
 contains
 
@@ -75,9 +76,17 @@ contains
   end subroutine profiler_stop
 
   !> Started a named (@a name) profiler region
-  subroutine profiler_start_region(name, region_id)
+  !! @param name Name of the region.
+  !! @param region_id Optional id of the region, avoids a name lookup and
+  !! is used to colour the range in the vendor profilers.
+  !! @param level Optional detail level, see the `RT_LVL_*` parameters.
+  !! Regions above the level requested in the case file are not timed by
+  !! the runtime statistics, but their vendor profiler ranges are always
+  !! emitted.
+  subroutine profiler_start_region(name, region_id, level)
     character(kind=c_char,len=*) :: name
     integer, optional :: region_id
+    integer, optional :: level
     logical :: in_parallel
 
 #ifdef HAVE_NVTX
@@ -100,21 +109,27 @@ contains
     end if
 #endif
 
-    ! Skip runtime stats inside OMP parallel regions: neko_rt_stats uses a
-    ! single shared LIFO stack that is not thread-safe. Concurrent pushes from
-    ! different threads corrupt the stack order and cause region mismatches.
+    ! Skip runtime stats inside OMP parallel regions: neko_rt_stats keeps a
+    ! single shared stack of open regions that is not thread-safe. Concurrent
+    ! pushes from different threads corrupt the stack order and cause region
+    ! mismatches.
     in_parallel = .false.
     !$ in_parallel = omp_in_parallel()
     if (.not. in_parallel) then
-       call neko_rt_stats%start_region(name, region_id)
+       call neko_rt_stats%start_region(name, region_id, level)
     end if
 
   end subroutine profiler_start_region
 
   !> End the most recently started profiler region
-  subroutine profiler_end_region(name, region_id)
+  !! @param name Optional name of the region to close.
+  !! @param region_id Optional id of the region to close.
+  !! @param level Optional detail level, must match the one the region was
+  !! started with.
+  subroutine profiler_end_region(name, region_id, level)
     character(kind=c_char, len=*), optional :: name
     integer, optional :: region_id
+    integer, optional :: level
     logical :: in_parallel
 
 #ifdef HAVE_NVTX
@@ -136,7 +151,7 @@ contains
     in_parallel = .false.
     !$ in_parallel = omp_in_parallel()
     if (.not. in_parallel) then
-       call neko_rt_stats%end_region(name, region_id)
+       call neko_rt_stats%end_region(name, region_id, level)
     end if
 
   end subroutine profiler_end_region

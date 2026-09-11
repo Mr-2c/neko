@@ -36,6 +36,8 @@ module device_math
   use utils, only : neko_error
   use comm, only : NEKO_COMM, pe_size, MPI_REAL_PRECISION, MPI_EXTRA_PRECISION
   use mpi_f08, only : MPI_SUM, MPI_MIN, MPI_MAX, MPI_IN_PLACE, MPI_Allreduce
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   use device, only : glb_cmd_queue
   ! ========================================================================== !
   ! Device math interfaces
@@ -1375,6 +1377,8 @@ contains
        strm_ = glb_cmd_queue
     end if
 
+    call profiler_start_region('Dot_product', 30, RT_LVL_SOLVER)
+
     res_xp = 0.0_xp
 #if HAVE_HIP
     res_xp = hip_glsc3(a_d, b_d, c_d, n, strm_)
@@ -1391,11 +1395,15 @@ contains
 
 #ifndef HAVE_DEVICE_MPI
     if (pe_size .gt. 1) then
+       call profiler_start_region('MPI_allreduce', 33, RT_LVL_SOLVER)
        call MPI_Allreduce(MPI_IN_PLACE, res_xp, 1, &
             MPI_EXTRA_PRECISION, MPI_SUM, NEKO_COMM, ierr)
+       call profiler_end_region('MPI_allreduce', 33, RT_LVL_SOLVER)
     end if
 #endif
     res = real(res_xp, kind=rp)
+
+    call profiler_end_region('Dot_product', 30, RT_LVL_SOLVER)
   end function device_glsc3
 
   subroutine device_glsc3_many(h, w_d, v_d_d, mult_d, j, n, strm)
@@ -1412,6 +1420,8 @@ contains
     else
        strm_ = glb_cmd_queue
     end if
+
+    call profiler_start_region('Dot_product_many', 31, RT_LVL_SOLVER)
 
 #if HAVE_HIP
     h_xp = 0.0_c_xp
@@ -1431,11 +1441,15 @@ contains
 
 #ifndef HAVE_DEVICE_MPI
     if (pe_size .gt. 1) then
+       call profiler_start_region('MPI_allreduce', 33, RT_LVL_SOLVER)
        call MPI_Allreduce(MPI_IN_PLACE, h_xp, j, &
             MPI_EXTRA_PRECISION, MPI_SUM, NEKO_COMM, ierr)
+       call profiler_end_region('MPI_allreduce', 33, RT_LVL_SOLVER)
     end if
 #endif
     h = real(h_xp, kind=c_rp)
+
+    call profiler_end_region('Dot_product_many', 31, RT_LVL_SOLVER)
   end subroutine device_glsc3_many
 
   subroutine device_add2s2_many(y_d, x_d_d, a_d, j, n, strm)
@@ -1480,6 +1494,8 @@ contains
        strm_ = glb_cmd_queue
     end if
 
+    call profiler_start_region('Dot_product', 30, RT_LVL_SOLVER)
+
     res_xp = 0.0_xp
 #if HAVE_HIP
     res_xp = hip_glsc2(a_d, b_d, n, strm_)
@@ -1496,11 +1512,15 @@ contains
 
 #ifndef HAVE_DEVICE_MPI
     if (pe_size .gt. 1) then
+       call profiler_start_region('MPI_allreduce', 33, RT_LVL_SOLVER)
        call MPI_Allreduce(MPI_IN_PLACE, res_xp, 1, &
             MPI_EXTRA_PRECISION, MPI_SUM, NEKO_COMM, ierr)
+       call profiler_end_region('MPI_allreduce', 33, RT_LVL_SOLVER)
     end if
 #endif
     res = real(res_xp, kind=rp)
+
+    call profiler_end_region('Dot_product', 30, RT_LVL_SOLVER)
   end function device_glsc2
 
   !> Returns the norm of the difference of two vectors

@@ -48,6 +48,8 @@ module cg_device
   use device_math, only : device_rzero, device_copy, device_glsc3, &
        device_add2s2, device_add2s1
   use, intrinsic :: iso_c_binding, only : c_ptr, C_NULL_PTR, c_associated
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -205,7 +207,9 @@ contains
     end if
     call this%monitor_start('CG')
     do iter = 1, max_iter
+       call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
        call this%M%solve(this%z, this%r, n)
+       call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
        rtz2 = rtz1
        rtz1 = device_glsc3(this%r_d, coef%mult_d, this%z_d, n)
        beta = rtz1 / rtz2

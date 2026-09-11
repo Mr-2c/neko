@@ -40,6 +40,8 @@ module interpolation
   use tensor_cpu, only : tnsr3d_cpu
   use space, only : space_t, operator(.eq.), GL, GLL
   use utils, only : neko_error
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_KERNEL
   use, intrinsic :: iso_c_binding
   implicit none
   private
@@ -173,6 +175,8 @@ contains
     type(space_t) :: to_space
     real(kind=rp), intent(in) :: x(this%Xh%lx, this%Xh%lx, this%Xh%lx, nel)
     real(kind=rp), intent(inout) :: y(this%Yh%lx, this%Yh%lx, this%Yh%lx, nel)
+
+    call profiler_start_region('Interpolate', 50, RT_LVL_KERNEL)
     if (to_space .eq. this%Yh) then
        call tnsr3d(y, this%Yh%lx, x, &
             this%Xh%lx, this%Yh_to_XhT, &
@@ -184,6 +188,8 @@ contains
     else
        call neko_error('Invalid interpolation')
     end if
+    call profiler_end_region('Interpolate', 50, RT_LVL_KERNEL)
+
   end subroutine interpolator_map
 
 

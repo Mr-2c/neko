@@ -47,6 +47,8 @@ module pipecg
   use comm, only : MPI_REAL_PRECISION, NEKO_COMM
   use mpi_f08, only : MPI_Iallreduce, MPI_IN_PLACE, MPI_SUM, MPI_Wait, &
        MPI_Request, MPI_Status
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -204,7 +206,9 @@ contains
          r(i) = f(i)
       end do
       !$omp end parallel do
+      call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
       call this%M%solve(u(1,u_prev), r, n)
+      call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
       call Ax%compute(w, u(1,u_prev), coef, x%msh, x%Xh)
       call gs_h%op(w, n, GS_OP_ADD)
       call bc_projector%apply(w, n)
@@ -240,7 +244,9 @@ contains
          call MPI_Iallreduce(MPI_IN_PLACE, reduction, 3, &
               MPI_REAL_PRECISION, MPI_SUM, NEKO_COMM, request, ierr)
 
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(mi, w, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          call Ax%compute(ni, mi, coef, x%msh, x%Xh)
          call gs_h%op(ni, n, GS_OP_ADD)
          call bc_projector%apply(ni, n)

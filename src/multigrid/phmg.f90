@@ -63,7 +63,8 @@ module phmg
   use neko_config, only : NEKO_BCKND_DEVICE
   use krylov, only : ksp_t, ksp_monitor_t, KSP_MAX_ITER, &
        krylov_solver_factory
-  use profiler, only : profiler_start_region, profiler_end_region
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   use logger, only : neko_log, LOG_SIZE
   use, intrinsic :: iso_c_binding
   implicit none
@@ -628,6 +629,7 @@ contains
            !------------!
            !   SMOOTH   !
            !------------!
+           call profiler_start_region('PHMG_smoother', 34, RT_LVL_SOLVER)
            if (NEKO_BCKND_DEVICE .eq. 1) then
               mg(lvl)%cheby_device%zero_initial_guess = .true.
               ksp_results = mg(lvl)%cheby_device%solve(Ax, z, &
@@ -641,10 +643,12 @@ contains
                    mg(lvl)%coef, mg(lvl)%bc_projector, &
                    mg(lvl)%gs_h, niter = mg(lvl)%smoother_itrs)
            end if
+           call profiler_end_region('PHMG_smoother', 34, RT_LVL_SOLVER)
 
            !------------!
            !  Residual  !
            !------------!
+           call profiler_start_region('PHMG_residual', 35, RT_LVL_SOLVER)
            call Ax%compute(w%x, z%x, mg(lvl)%coef, msh, mg(lvl)%Xh)
            call mg(lvl)%gs_h%op(w%x, mg(lvl)%dm_Xh%size(), GS_OP_ADD, &
                 glb_cmd_event)
@@ -665,9 +669,12 @@ contains
               !$omp end parallel do
            end if
 
+           call profiler_end_region('PHMG_residual', 35, RT_LVL_SOLVER)
+
            !------------!
            !  Restrict  !
            !------------!
+           call profiler_start_region('PHMG_restrict', 36, RT_LVL_SOLVER)
            if (NEKO_BCKND_DEVICE .eq. 1) then
               call device_col2(w%x_d, mg(lvl)%coef%mult_d, mg(lvl)%dm_Xh%size())
            else
@@ -697,18 +704,19 @@ contains
               end do
               !$omp end parallel do
            end if
+           call profiler_end_region('PHMG_restrict', 36, RT_LVL_SOLVER)
          end associate
          call profiler_end_region( "PHMG_level_" // trim(lvl_name))
       end do
 
-      call profiler_start_region( 'PHMG_coarse-solve' )
+      call profiler_start_region('PHMG_coarse-solve', 38)
       !------------!
       !   SOLVE    !
       !------------!
       call this%amg_solver%solve(mg(this%nlvls-1)%z%x, &
            mg(this%nlvls-1)%r%x, &
            mg(this%nlvls-1)%dm_Xh%size())
-      call profiler_end_region( 'PHMG_coarse-solve' )
+      call profiler_end_region('PHMG_coarse-solve', 38)
 
       do lvl = (this%nlvls-2), 0, -1
          write(lvl_name, '(I0)') lvl
@@ -717,6 +725,7 @@ contains
            !------------!
            !  Project   !
            !------------!
+           call profiler_start_region('PHMG_prolong', 37, RT_LVL_SOLVER)
            call intrp(lvl+1)%map(w%x, mg(lvl+1)%z%x, msh%nelv, mg(lvl)%Xh)
 
            call mg(lvl)%gs_h%op(w%x, mg(lvl)%dm_Xh%size(), GS_OP_ADD, &
@@ -746,9 +755,12 @@ contains
               !$omp end parallel do
            end if
 
+           call profiler_end_region('PHMG_prolong', 37, RT_LVL_SOLVER)
+
            !------------!
            !   SMOOTH   !
            !------------!
+           call profiler_start_region('PHMG_smoother', 34, RT_LVL_SOLVER)
            if (NEKO_BCKND_DEVICE .eq. 1) then
               ksp_results = mg(lvl)%cheby_device%solve(Ax, z, &
                    r%x, mg(lvl)%dm_Xh%size(), &
@@ -760,6 +772,7 @@ contains
                    mg(lvl)%coef, mg(lvl)%bc_projector, &
                    mg(lvl)%gs_h, niter = mg(lvl)%smoother_itrs)
            end if
+           call profiler_end_region('PHMG_smoother', 34, RT_LVL_SOLVER)
          end associate
          call profiler_end_region( "PHMG_level_" // trim(lvl_name))
       end do

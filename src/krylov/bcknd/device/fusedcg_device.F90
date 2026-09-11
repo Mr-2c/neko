@@ -52,6 +52,8 @@ module fusedcg_device
   use mpi_f08, only : MPI_Allreduce, MPI_IN_PLACE, MPI_SUM
   use, intrinsic :: iso_c_binding, only : c_ptr, C_NULL_PTR, &
        c_associated, c_size_t, c_sizeof, c_int, c_loc
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -376,7 +378,9 @@ contains
 
       call this%monitor_start('FusedCG')
       do iter = 1, max_iter
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(z, r, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          rtz2 = rtz1
          rtz1 = device_glsc3(r_d, coef%mult_d, z_d, n)
          beta = rtz1 / rtz2

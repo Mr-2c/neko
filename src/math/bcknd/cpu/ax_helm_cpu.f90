@@ -36,6 +36,8 @@ module ax_helm_cpu
   use coefs, only : coef_t
   use space, only : space_t
   use mesh, only : mesh_t
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_KERNEL
   implicit none
   private
 
@@ -93,6 +95,8 @@ contains
     real(kind=rp), intent(inout) :: w(Xh%lx, Xh%ly, Xh%lz, msh%nelv)
     real(kind=rp), intent(in) :: u(Xh%lx, Xh%ly, Xh%lz, msh%nelv)
     integer :: i
+
+    call profiler_start_region('Ax_helm', 27, RT_LVL_KERNEL)
 
     !$omp parallel
     select case(Xh%lx)
@@ -163,6 +167,8 @@ contains
        !$omp end do
     end if
     !$omp end parallel
+
+    call profiler_end_region('Ax_helm', 27, RT_LVL_KERNEL)
 
   end subroutine ax_helm_compute
 

@@ -36,7 +36,8 @@ module cheby
   use precon, only : pc_t
   use ax_product, only : ax_t
   use num_types, only: rp
-  use profiler, only : profiler_start_region, profiler_end_region
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   use field, only : field_t
   use coefs, only : coef_t
   use mesh, only : mesh_t
@@ -191,7 +192,9 @@ contains
             call this%schwarz%compute(r, w)
             call copy(w, r, n)
          else
+            call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
             call this%M%solve(r, w, n)
+            call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
             call copy(w, r, n)
          end if
 
@@ -207,7 +210,9 @@ contains
          call this%schwarz%compute(r, w)
          call copy(w, r, n)
       else
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(r, w, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          call copy(w, r, n)
       end if
 
@@ -274,7 +279,9 @@ contains
       ksp_results%iter = 0
 
       ! First iteration
+      call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
       call this%M%solve(w, r, n)
+      call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
       call copy(d, w, n)
       a = 2.0_rp / this%tha
       call add2s2(x%x, d, a, n)! x = x + a*d
@@ -288,7 +295,9 @@ contains
          call bc_projector%apply(w, n)
          call sub2(r, w, n)
 
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(w, r, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
 
          if (iter .eq. 2) then
             b = 0.5_rp * (this%dlt * a)**2
@@ -359,7 +368,9 @@ contains
       if (associated(this%schwarz)) then
          call this%schwarz%compute(d, r)
       else
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(d, r, n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
       end if
 
       inv_tha = 1.0_rp / this%tha
@@ -392,7 +403,9 @@ contains
          if (associated(this%schwarz)) then
             call this%schwarz%compute(w, r)
          else
+            call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
             call this%M%solve(w, r, n)
+            call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
          end if
          !OCL NORECURRENCE, NOVREC, NOALIAS
          !DIR$ CONCURRENT

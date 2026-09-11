@@ -49,6 +49,8 @@ module bicgstab_cpld
   use math, only : NEKO_EPS
   use utils, only : neko_error
   use, intrinsic :: ieee_arithmetic, only : ieee_is_finite
+  use profiler, only : profiler_start_region, profiler_end_region, &
+       RT_LVL_SOLVER
   implicit none
   private
 
@@ -321,9 +323,11 @@ contains
 
          ! The preconditioner interface is scalar, so apply the same
          ! preconditioner separately to all three components.
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(p_hat(:, 1), p(:, 1), n)
          call this%M%solve(p_hat(:, 2), p(:, 2), n)
          call this%M%solve(p_hat(:, 3), p(:, 3), n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
 
          call Ax%compute_vector(v(:, 1), v(:, 2), v(:, 3), p_hat(:, 1), &
               p_hat(:, 2), p_hat(:, 3), coef, x%msh, x%Xh)
@@ -372,9 +376,11 @@ contains
             exit
          end if
 
+         call profiler_start_region('Precon_apply', 29, RT_LVL_SOLVER)
          call this%M%solve(s_hat(:, 1), r(:, 1), n)
          call this%M%solve(s_hat(:, 2), r(:, 2), n)
          call this%M%solve(s_hat(:, 3), r(:, 3), n)
+         call profiler_end_region('Precon_apply', 29, RT_LVL_SOLVER)
 
          call Ax%compute_vector(t(:, 1), t(:, 2), t(:, 3), s_hat(:, 1), &
               s_hat(:, 2), s_hat(:, 3), coef, x%msh, x%Xh)
