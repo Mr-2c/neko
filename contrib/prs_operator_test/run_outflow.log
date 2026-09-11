@@ -1,0 +1,287 @@
+
+    _  __  ____  __ __  ____  
+   / |/ / / __/ / //_/ / __ \ 
+  /    / / _/  / ,<   / /_/ / 
+ /_/|_/ /___/ /_/|_|  \____/  
+
+ (version: 1.99.9)
+ (build: 2026-09-11 on x86_64-pc-linux-gnu using gnu)
+
+
+ -------Job Information--------
+ Start time: 17:41 / 2026-09-11
+ Running on: 1 MPI rank
+ CPU type  : Intel(R) Xeon(R) Processor @ 2.80GHz
+ Bcknd type: CPU
+ Real type : double precision
+
+ -------------Case-------------
+ Reading case file outflow.case
+
+  -------------Mesh-------------
+  Reading a binary Neko file box_outflow.nmsh
+  gdim = 3, nelements =        36
+  Reading elements
+  Reading BC/zone data
+  Reading deformation data
+  Mesh read, setting up connectivity
+  Done setting up mesh and connectivity
+  Mesh and connectivity setup (excluding read) time (s):  0.000429
+
+  --------Gather-Scatter--------
+  Comm         :          MPI
+  Avg. internal:         3150
+  Avg. external:            0
+  Backend      :          std
+
+  ---------Coefficients---------
+  Metric condition :  9.94791E+01
+
+  ------------Fluid-------------
+  Type       : Modular (Pn/Pn)
+  Name       : fluid
+  Read non-dimensional material properties
+  Re         : 2.800000E+03
+  rho        : 1.000000E+00
+  mu         : 3.571429E-04
+  Poly order : 4
+  GLL points : 4500
+  Unique pts.: 2652
+  Dealias    : T
+  Save bdry  : F
+  Full stress: F
+
+   -------Velocity solver--------
+   Type       : (cg, jacobi)
+   Abs tol    : 1.000000E-07
+
+   --Fluid boundary conditions---
+   BC assigned name :   velocity_bc_1
+   BC assigned name :   velocity_bc_3
+   BC assigned name :   pressure_bc_2
+
+   -------Pressure solver--------
+   Type       : (gmres, hsmg)
+   Abs tol    : 1.000000E-08
+
+    -------------HSMG-------------
+    HSMG hierarchy      : 3 levels
+    Coarse grid solver  : (cg, jacobi)
+    Coarse grid iters.  : 10
+
+     --------Gather-Scatter--------
+     Comm         :          MPI
+     Avg. internal:          288
+     Avg. external:            0
+     Backend      :          std
+
+     --------Gather-Scatter--------
+     Comm         :          MPI
+     Avg. internal:         1848
+     Avg. external:            0
+     Backend      :          std
+
+     --------Gather-Scatter--------
+     Comm         :          MPI
+     Avg. internal:         6798
+     Avg. external:            0
+     Backend      :          std
+
+     --------Gather-Scatter--------
+     Comm         :          MPI
+     Avg. internal:         4800
+     Avg. external:            0
+     Backend      :          std
+
+  ---Fluid initial condition----
+  Type : expression
+  u    : (1-y*y) + 0.3*sin(x)*cos(2*z)
+  v    : 0.3*cos(x)*sin(2*z)*(1-y*y)
+  w    : 0.3*sin(2*x)*cos(z)*(1-y*y)
+
+  -----Adding write output------
+  File name        : field.fld
+  Write control    : never
+  Output precision : single
+
+ -----Starting simulation------
+ T  : [  0.0000000E+00,   0.8000000E-01]
+ dt :    0.1000000E-01
+
+ ------------------------------------------------------------------------------
+ Step =           1 t =   1.000000000000000E-02                     [  12.50% ]
+ ------------------------------------------------------------------------------
+
+   --------Preprocessing---------
+   CFL:  0.0494  dt: 1.0000000E-02
+
+   ------------Fluid-------------
+   KSP solver   | Field              Iters:   Start residual:   Final residual:
+   1            | Pressure               27   0.703456488E+01   0.828645016E-08
+   1            | X-Velocity              3   0.594892189E+01   0.166522135E-08
+   1            | Y-Velocity              3   0.893129010E+00   0.453637525E-09
+   1            | Z-Velocity              3   0.181932585E+01   0.482076702E-09
+   Fluid step time (s):     0.2570412E-01
+
+   ---------Step summary---------
+   Total time for step        1 (s):   0.2585297E-01
+   Total elapsed time (s):             0.2585601E-01
+ ------------------------------------------------------------------------------
+ Step =           2 t =   2.000000000000000E-02                     [  25.00% ]
+ ------------------------------------------------------------------------------
+
+   --------Preprocessing---------
+   CFL:  0.0621  dt: 1.0000000E-02
+
+   ------------Fluid-------------
+   KSP solver   | Field              Iters:   Start residual:   Final residual:
+   2            | Pressure               28   0.106036860E+02   0.931626461E-08
+   2            | X-Velocity              3   0.367080858E+00   0.958074515E-10
+   2            | Y-Velocity              2   0.404204844E+00   0.928651914E-07
+   2            | Z-Velocity              2   0.231920112E+00   0.460546310E-07
+   Fluid step time (s):     0.2613123E-01
+
+   ---------Step summary---------
+   Total time for step        2 (s):   0.2623196E-01
+   Total elapsed time (s):             0.5211442E-01
+ ------------------------------------------------------------------------------
+ Step =           3 t =   3.000000000000000E-02                     [  37.50% ]
+ ------------------------------------------------------------------------------
+
+   --------Preprocessing---------
+   CFL:  0.0806  dt: 1.0000000E-02
+
+   ------------Fluid-------------
+   KSP solver   | Field              Iters:   Start residual:   Final residual:
+   3            | Pressure               29   0.651275497E+01   0.538825813E-08
+   3            | X-Velocity              2   0.218866548E+00   0.467209421E-07
+   3            | Y-Velocity              2   0.146389143E+00   0.253980362E-07
+   3            | Z-Velocity              2   0.140428411E+00   0.199229752E-07
+   Fluid step time (s):     0.2784783E-01
+
+   ---------Step summary---------
+   Total time for step        3 (s):   0.2791374E-01
+   Total elapsed time (s):             0.8003752E-01
+ ------------------------------------------------------------------------------
+ Step =           4 t =   4.000000000000000E-02                     [  50.00% ]
+ ------------------------------------------------------------------------------
+
+   --------Preprocessing---------
+   CFL:  0.0778  dt: 1.0000000E-02
+
+   ------------Fluid-------------
+   KSP solver   | Field              Iters:   Start residual:   Final residual:
+   4            | Pressure               27   0.313887686E+01   0.507657096E-08
+   4            | X-Velocity              2   0.150919139E+00   0.352413316E-07
+   4            | Y-Velocity              2   0.108712570E+00   0.156512476E-07
+   4            | Z-Velocity              2   0.897776292E-01   0.132278269E-07
+   Fluid step time (s):     0.2691654E-01
+
+   ---------Step summary---------
+   Total time for step        4 (s):   0.2699057E-01
+   Total elapsed time (s):             0.1070388E+00
+ ------------------------------------------------------------------------------
+ Step =           5 t =   5.000000000000000E-02                     [  62.50% ]
+ ------------------------------------------------------------------------------
+
+   --------Preprocessing---------
+   CFL:  0.0771  dt: 1.0000000E-02
+
+   ------------Fluid-------------
+   KSP solver   | Field              Iters:   Start residual:   Final residual:
+   5            | Pressure               24   0.474366756E+00   0.578464578E-08
+   5            | X-Velocity              2   0.115425104E+00   0.290690211E-07
+   5            | Y-Velocity              2   0.840933983E-01   0.129275181E-07
+   5            | Z-Velocity              2   0.688157946E-01   0.102328943E-07
+   Fluid step time (s):     0.2483979E-01
+
+   ---------Step summary---------
+   Total time for step        5 (s):   0.2490642E-01
+   Total elapsed time (s):             0.1319549E+00
+ ------------------------------------------------------------------------------
+ Step =           6 t =   6.000000000000000E-02                     [  75.00% ]
+ ------------------------------------------------------------------------------
+
+   --------Preprocessing---------
+   CFL:  0.0771  dt: 1.0000000E-02
+
+   ------------Fluid-------------
+   KSP solver   | Field              Iters:   Start residual:   Final residual:
+   6            | Pressure               22   0.170045228E+00   0.377212782E-08
+   6            | X-Velocity              2   0.870399246E-01   0.251056347E-07
+   6            | Y-Velocity              2   0.736196512E-01   0.103234167E-07
+   6            | Z-Velocity              2   0.636466859E-01   0.954633807E-08
+   Fluid step time (s):     0.2095696E-01
+
+   ---------Step summary---------
+   Total time for step        6 (s):   0.2103098E-01
+   Total elapsed time (s):             0.1529957E+00
+ ------------------------------------------------------------------------------
+ Step =           7 t =   7.000000000000001E-02                     [  87.50% ]
+ ------------------------------------------------------------------------------
+
+   --------Preprocessing---------
+   CFL:  0.0764  dt: 1.0000000E-02
+
+   ------------Fluid-------------
+   KSP solver   | Field              Iters:   Start residual:   Final residual:
+   7            | Pressure               21   0.151559926E+00   0.645812695E-08
+   7            | X-Velocity              2   0.719323671E-01   0.230529139E-07
+   7            | Y-Velocity              2   0.636775931E-01   0.870472298E-08
+   7            | Z-Velocity              2   0.611983506E-01   0.928571646E-08
+   Fluid step time (s):     0.2164318E-01
+
+   ---------Step summary---------
+   Total time for step        7 (s):   0.2170806E-01
+   Total elapsed time (s):             0.1747136E+00
+ ------------------------------------------------------------------------------
+ Step =           8 t =   8.000000000000000E-02                     [ 100.00% ]
+ ------------------------------------------------------------------------------
+
+   --------Preprocessing---------
+   CFL:  0.0755  dt: 1.0000000E-02
+
+   ------------Fluid-------------
+   KSP solver   | Field              Iters:   Start residual:   Final residual:
+   8            | Pressure               21   0.999972146E-01   0.443508488E-08
+   8            | X-Velocity              2   0.649451112E-01   0.219640884E-07
+   8            | Y-Velocity              2   0.539279559E-01   0.744033287E-08
+   8            | Z-Velocity              2   0.588942079E-01   0.898905951E-08
+   Fluid step time (s):     0.2148708E-01
+
+   ---------Step summary---------
+   Total time for step        8 (s):   0.2156124E-01
+   Total elapsed time (s):             0.1962852E+00
+ Normal end.
+ === OPERATOR STATE AT THE PRESSURE SOLVE ===
+ h1  min/max   :    1.0000000000000000        1.0000000000000000     
+ h2  min/max   :    0.0000000000000000        0.0000000000000000     
+ ifh2          :  F
+ prs_dirichlet :  T
+ prs mask size :          300
+ lx/nelv/ndofl :            5          36        4500
+ rho / mu      :    1.0000000000000000        3.5714285714285714E-004
+ unique dofs   :         2652
+ --- matrix-free symmetry:  <u,Av> vs <v,Au>  (global inner prod) ---
+   max |<u,Av>-<v,Au>|          :  0.66224968507651738     
+   relative to max |<u,Av>|     :   5.4663376415245261E-004
+ --- matrix-free definiteness: <v,Av> for random continuous v ---
+   min <v,Av> over samples      :   1077.8534998872963     
+   ||A*1||_inf (constant mode)  :   1.9153963971592383E-015
+ --- representative-copy consistency (must be ~0) ---
+   max|w(i) - w(rep(l2g(i)))|   :   0.0000000000000000     
+ rhs consistency  sum_unique(b) :  -3.0808688933348094E-015
+ KSP(manufactured): iters =          19  res start/final =  0.69113717516154605        8.0509258682611460E-009
+ wrote rhs_sol.bin (x_exact, b, x_ksp)
+ --- VELOCITY OPERATOR STATE ---
+ (this is the SCALAR Helmholtz that Ax_vel%compute_vector
+  applies to each component in the no-model formulation;
+  the full velocity solve additionally applies rotate_cyc,
+  which is a no-op without cyclic bcs, and the per-component
+  Dirichlet mask, which is applied below.)
+ h1 min/max :   3.5714285714285714E-004   3.5714285714285714E-004
+ h2 min/max :   183.33333333333331        183.33333333333331     
+ ifh2       : T
+ x-velocity mask size :         720
+ wrote vel_op.bin
+ wrote prs_op.bin and space1d.bin

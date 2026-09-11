@@ -1,64 +1,117 @@
-# Pn-Pn pressure operator: symmetry, definiteness and separability test
+# Pn-Pn pressure operator: symmetry, definiteness and separability
 
-Assembles the pressure operator **exactly as the Krylov solver applies it** and
-checks whether it is SPD and whether it is separable on a tensor-product
-(channel) mesh.
+Assembles the Neko `pnpn` pressure operator **exactly as the Krylov solver
+applies it** and tests whether it is SPD, and whether it is separable on a
+tensor-product (channel) mesh. Also does the same for the velocity Helmholtz
+operator.
 
-`assemble.f90` runs a real `pnpn` case for a few steps, then re-executes
-`prs_res%compute` -- the routine that sets `c_Xh%h1`, `c_Xh%h2` and `ifh2`, and
-therefore *defines* the operator -- and assembles
+## What is assembled, and why it is the right object
 
-    A = bcs_prs_projector%apply( gs_Xh%op( Ax_prs%compute(p), GS_OP_ADD ) )
+Inside `gmres.f90:225-228` (and identically `cg.f90:207-209`) the operator is
 
-column by column in the global unique-dof basis.  The unique-dof numbering is
-taken from the gather-scatter itself (`GS_OP_MIN` on the local index), so it is
-consistent with the operator by construction rather than by assumption.
+    call Ax%compute(w, z, coef, msh, Xh)
+    call gs_h%op(w, n, GS_OP_ADD)
+    call bc_projector%apply(w, n)
 
-It also runs scalable matrix-free checks (`<u,Av>` vs `<v,Au>`, `<v,Av>`,
-`A*1`), a manufactured-solution comparison against Neko's own Krylov solve,
-and assembles the velocity Helmholtz operator.
+`assemble.f90` runs a real case for a few steps, re-executes `prs_res%compute`
+(the routine that sets `c_Xh%h1`, `c_Xh%h2` and `ifh2`, and therefore *defines*
+the operator), then applies that same triple column by column.
 
-## Build
+The unique-dof numbering comes from the gather-scatter itself (`GS_OP_MIN` on
+the local index), so it is the operator's own notion of dof identity rather
+than an assumption. Because `coef%mult = 1/multiplicity`, summing
+`u(rep(i))*Au(rep(i))` over unique dofs is *exactly* the `glsc3(.,.,coef%mult)`
+inner product the Krylov solver minimises in — so "the matrix is symmetric"
+means "the operator is self-adjoint in the solver's own norm".
+
+Self-checks printed at run time: representative-copy consistency
+(`max|w(i) - w(rep(l2g(i)))|`, must be 0, since `bc_projector%apply` is a plain
+local index list with no gather-scatter propagation), and right-hand-side
+consistency (`sum_unique(b)`, must be ~0 for the pure-Neumann case).
+
+## Limitations
+
+Serial, CPU backend, double precision only — enforced with `neko_error` at
+startup. Dense assembly is skipped above 14000 unique dofs; the matrix-free
+symmetry/definiteness checks still run.
+
+## Build and run
 
     mpif90 -O2 -fallow-argument-mismatch -I<prefix>/include/neko \
         -o assemble assemble.f90 -L<prefix>/lib -lneko -ljsonfortran -llapack -lblas
 
-## Mesh
-
-    # stretched wall-normal distribution, optionally non-uniform streamwise
-    python3 -c "import numpy as np; ny=6; g=2.2; \
-      eta=np.arange(ny+1)/ny; y=np.tanh(g*(2*eta-1))/np.tanh(g); \
-      open('disty.csv','w').write(','.join(f'{v:.16e}' for v in y))"
-    genmeshbox 0 6.283185307179586 -1 1 0 3.141592653589793 3 6 3 \
-        .true. .false. .true. uniform disty.csv uniform
-
-## Run
-
-    ./assemble channel.case      # periodic x,z + walls in y  -> pure Neumann
-    ./assemble outflow.case      # with a Dirichlet pressure bc
+    ./mkmesh.sh                  # writes box_channel.nmsh and box_outflow.nmsh
+    ./assemble channel.case      # periodic x,z + no-slip walls -> pure Neumann
     python3 analyze.py           # symmetry, spectrum, null space
     python3 sep.py               # A vs Kx(x)My(x)Mz + Mx(x)Ky(x)Mz + Mx(x)My(x)Kz
     python3 fd.py                # direct fast-diagonalisation solve vs Neko's KSP
+    python3 velsep.py            # velocity Helmholtz, with the real wall mask
+    python3 circulant.py         # is a uniform periodic direction FFT-diagonalisable?
 
-## Results (Neko 1.99.9, CPU backend, double precision)
+    ./assemble outflow.case      # with a Dirichlet pressure bc
+    python3 mask_analysis.py     # where the asymmetry lives
 
-Channel, periodic x/z, no-slip walls, mesh non-uniform in x (1.6x) and
-tanh-stretched in y (8.1x), order 4, 54 elements, 3600 unique dofs:
+## Results
+
+Neko 1.99.9 (`ce9b260`), CPU, fp64, gfortran 13.3. Channel `2pi x 2 x pi`,
+periodic in x and z, no-slip walls in y. Mesh **non-uniform in x** (widths
+1.65/2.65/1.98) and tanh-stretched in y (heights ratio 8.1). Order 4 (`lx=5`),
+54 elements, 3600 unique dofs.
+
+Operator state read from the live objects: `h1 = 1.0` everywhere (`= 1/rho`),
+`h2 = 0`, `ifh2 = F`, `prs_dirichlet = F`, pressure mask size 0.
 
 | quantity | value |
 | --- | --- |
-| `max abs(A - A^T) / max abs(A)` | 1.3e-16 |
-| `abs(A*1)` (constant mode) | 2.8e-14 |
-| number of negative eigenvalues | 0 |
-| number of zero eigenvalues | 1 |
-| `max abs(Im lambda) / max abs(Re lambda)` | 1.2e-17 |
-| `abs(A - A_separable) / max abs(A)` | 4.3e-14 |
-| `A` after 4 steps vs after 9 steps | bit-identical |
+| `max abs(A - A^T) / max abs(A)` | 1.25e-16 (eps = 2.22e-16) |
+| `norm_F(A - A^T) / norm_F(A)` | 6.44e-17 |
+| matrix-free `<u,Av>` vs `<v,Au>`, relative | 1.57e-16 |
+| `abs(A*1)_inf` (constant mode) | 2.84e-14 |
+| negative eigenvalues | 0 |
+| zero eigenvalues | 1 |
+| 2nd smallest / largest eigenvalue | 9.33e-03 / 1.07e+02 |
+| `max abs(Im lambda) / max abs(Re lambda)` | 1.17e-17 |
+| `max abs(A - A_separable) / max abs(A)` | 4.26e-14 |
+| representative-copy consistency | 0.0 exactly |
 
 i.e. symmetric positive semi-definite with a one-dimensional null space of
 constants, and exactly equal to the separable Kronecker sum.
 
-With a Dirichlet pressure bc (`outflow.case`) the mask is applied to the rows
-only, so the matrix handed to the Krylov solver is genuinely non-symmetric
-(2.3e-2 relative).  Restricted to the unmasked dofs it is symmetric to 1.5e-16
-and strictly positive definite.
+Direct separable (fast-diagonalisation) solve against Neko's own GMRES+hsmg,
+same operator, same manufactured right-hand side:
+
+| | residual `norm(Ax-b)/norm(b)` | error vs exact |
+| --- | --- | --- |
+| Neko GMRES + hsmg, 33 iterations | 1.31e-08 | 3.71e-09 |
+| direct fast diagonalisation | 8.09e-14 | 8.05e-14 |
+| agreement between the two | | 3.71e-09 |
+
+Velocity Helmholtz (`h1 = mu = 3.571e-4`, `h2 = rho*bd/dt = 183.33`, both
+constant), with the real per-component no-slip mask applied (288 masked rows =
+the two wall planes exactly): symmetric to 1.19e-19, strictly positive definite
+(min eigenvalue 6.35e-02, condition number 230), and equal to
+`mu * Laplacian_sep + h2 * Mass_sep` to 2.85e-15.
+
+`circulant.py`: on a **uniform** periodic element line the assembled 1-D
+operator is block-circulant with block size `lx-1`, so an FFT across elements
+block-diagonalises it to 1.2e-16 (control: non-uniform spacing gives 1.6e-01).
+
+## Dirichlet pressure boundary condition (`outflow.case`)
+
+`bcs_prs_projector%apply` zeroes the operator **output** only, so Neko applies
+`M*A`, not `M*A*M`:
+
+| quantity | value |
+| --- | --- |
+| `max abs(A - A^T) / max abs(A)` | 2.26e-02 (not round-off) |
+| all-zero rows / all-zero columns | 204 / 0 |
+| restricted to the 2448 unmasked dofs: symmetry | 1.54e-16 |
+| restricted: min / max eigenvalue | 9.24e-04 / 3.21e+01 |
+| restricted: negative / zero eigenvalues | 0 / 0 |
+| `M A M` symmetry | 1.54e-16 |
+
+The asymmetry lives entirely in the masked columns. Every Krylov vector is
+masked (the initial residual at `fluid_pnpn.f90:857`, every operator output at
+`gmres.f90:248`), so that subspace is `A`-invariant and the iteration only ever
+sees the symmetric part — but this is preconditioner-dependent and is **not**
+tested here.

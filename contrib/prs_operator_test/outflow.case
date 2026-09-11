@@ -1,7 +1,7 @@
 {
 "version": 1.0,
 "case": {
-    "mesh_file": "box_out.nmsh",
+    "mesh_file": "box_outflow.nmsh",
     "output_at_end": false,
     "output_boundary": false,
     "output_checkpoints": false,

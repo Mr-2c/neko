@@ -40,8 +40,7 @@ def fdsolve(b):
 f=open('rhs_sol.bin','rb'); m=struct.unpack('i',f.read(4))[0]
 xex,b,xksp=[np.frombuffer(f.read(8*m),dtype=np.float64).copy() for _ in range(3)]
 f.close(); assert m==n
-# reorder into the tensor ordering used for Ap
-import subprocess
+# reorder into the tensor ordering used for Ap (written by sep.py)
 P=np.load('perm.npy')
 xex,b,xksp=xex[P],b[P],xksp[P]
 

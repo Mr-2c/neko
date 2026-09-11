@@ -6,6 +6,11 @@ program assemble_prs_operator
   use gs_ops, only : GS_OP_ADD, GS_OP_MIN
   use operators, only : ortho
   use krylov, only : ksp_monitor_t
+  use num_types, only : dp
+  use comm, only : pe_size
+  use neko_config, only : NEKO_BCKND_DEVICE
+  use vector_bc_projector, only : vector_bc_projector_components
+  use scalar_bc_projector, only : scalar_bc_projector_t
   implicit none
 
   type(case_t), target :: C
@@ -17,6 +22,18 @@ program assemble_prs_operator
   type(c_ptr) :: ev = C_NULL_PTR
 
   call neko_init(C)
+
+  ! The harness labels dofs by rank-local index and writes one shared file, so
+  ! it is serial-only.  It also reads and writes host arrays throughout, and
+  ! encodes integer dof labels in reals, so it needs a CPU double-precision
+  ! build.  Fail loudly rather than producing quietly wrong matrices.
+  if (pe_size .gt. 1) call neko_error( &
+       'assemble: serial only, run with a single MPI rank')
+  if (NEKO_BCKND_DEVICE .eq. 1) call neko_error( &
+       'assemble: CPU backend only, no host/device transfers are issued')
+  if (rp .ne. dp) call neko_error( &
+       'assemble: double precision build only (dof labels are held in reals)')
+
   call neko_solve(C)
 
   select type (fl => C%fluid)
@@ -134,6 +151,20 @@ program assemble_prs_operator
           anorm = max(anorm, abs(AU(rep(i),1)))
        end do
        write(*,*) '  ||A*1||_inf (constant mode)  :', anorm
+
+       ! The representative-copy extraction A(i,j) = w(rep(i)) is only
+       ! well-defined if the masked operator output is gs-continuous.  gs_op
+       ! makes it continuous, but bcs_prs_projector%apply is a plain local
+       ! index list with no gather-scatter propagation, so a boundary zone
+       ! that masks a dof in one element but not in its neighbour would break
+       ! this.  Measure it rather than assume it.
+       anorm = 0.0_rp; quad = 0.0_rp
+       do i = 1, n
+          anorm = max(anorm, abs(AU(i,1) - AU(rep(l2g(i)),1)))
+          quad = max(quad, abs(AU(i,1)))
+       end do
+       write(*,*) '--- representative-copy consistency (must be ~0) ---'
+       write(*,*) '  max|w(i) - w(rep(l2g(i)))|   :', anorm
      end block
 
      if (nglb .gt. 14000) then
@@ -160,6 +191,7 @@ program assemble_prs_operator
      block
        real(kind=rp), allocatable :: xex(:), b(:), gxex(:), gb(:), gksp(:)
        type(ksp_monitor_t) :: km
+       real(kind=rp) :: cshift
        allocate(xex(n), b(n), gxex(nglb), gb(nglb), gksp(nglb))
        ! smooth, well-resolved manufactured pressure field (continuous by
        ! construction: it is a function of the coordinates only)
@@ -181,15 +213,33 @@ program assemble_prs_operator
              end do
           end do
        end do
-       call ortho(xex, fl%glb_n_points, n)
+       ! Fix the free constant by de-meaning over the UNIQUE dofs.  (Neko's
+       ! own ortho() divides by the redundant point count glb_n_points, which
+       ! is the right thing for the residual it is applied to but is not a
+       ! unique-dof mean; here we only need a canonical representative.)
+       cshift = 0.0_rp
+       do i = 1, nglb
+          cshift = cshift + xex(rep(i))
+       end do
+       cshift = cshift / real(nglb, kind=rp)
+       do i = 1, n
+          xex(i) = xex(i) - cshift
+       end do
        do i = 1, nglb
           gxex(i) = xex(rep(i))
        end do
-       ! b = A x_exact, using exactly the operator the Krylov solver applies
+       ! b = A x_exact, using exactly the operator the Krylov solver applies.
+       ! NOTE: no ortho() here.  b is by construction in range(A), and Neko's
+       ! ortho() applied AFTER the gather-scatter would subtract a
+       ! multiplicity-weighted mean and push a consistent rhs out of range.
        call fl%Ax_prs%compute(b, xex, fl%c_Xh, fl%msh, fl%Xh)
        call fl%gs_Xh%op(b, n, GS_OP_ADD)
        call fl%bcs_prs_projector%apply(b, n)
-       call ortho(b, fl%glb_n_points, n)
+       cshift = 0.0_rp
+       do i = 1, nglb
+          cshift = cshift + b(rep(i))
+       end do
+       write(*,*) 'rhs consistency  sum_unique(b) :', cshift
        do i = 1, n
           fl%p_res%x(i,1,1,1) = b(i)
        end do
@@ -214,15 +264,25 @@ program assemble_prs_operator
      block
        real(kind=rp), allocatable :: Av(:,:), pv(:), wv(:)
        integer :: lu2
+       type(scalar_bc_projector_t), pointer :: bcx, bcy, bcz
        ! vel_res%compute sets h1 = mu, h2 = rho*bd/dt, ifh2 = .true.
        call fl%vel_res%compute(fl%Ax_vel, fl%u, fl%v, fl%w, &
             fl%u_res, fl%v_res, fl%w_res, fl%p, fl%f_x, fl%f_y, fl%f_z, &
             fl%c_Xh, fl%msh, fl%Xh, fl%mu_tot, fl%rho, &
             fl%ext_bdf%diffusion_coeffs%x(1), real(C%time%dt, kind=rp), n)
        write(*,*) '--- VELOCITY OPERATOR STATE ---'
+       write(*,*) '(this is the SCALAR Helmholtz that Ax_vel%compute_vector'
+       write(*,*) ' applies to each component in the no-model formulation;'
+       write(*,*) ' the full velocity solve additionally applies rotate_cyc,'
+       write(*,*) ' which is a no-op without cyclic bcs, and the per-component'
+       write(*,*) ' Dirichlet mask, which is applied below.)'
        write(*,*) 'h1 min/max :', minval(fl%c_Xh%h1), maxval(fl%c_Xh%h1)
        write(*,*) 'h2 min/max :', minval(fl%c_Xh%h2), maxval(fl%c_Xh%h2)
        write(*,*) 'ifh2       :', fl%c_Xh%ifh2
+       bcx => null(); bcy => null(); bcz => null()
+       call vector_bc_projector_components(fl%bcs_vel_projector, bcx, bcy, bcz)
+       if (associated(bcx)) write(*,*) 'x-velocity mask size :', &
+            bcx%dof_mask%size()
        allocate(Av(nglb, nglb), pv(n), wv(n))
        do j = 1, nglb
           pv = 0.0_rp
@@ -231,6 +291,7 @@ program assemble_prs_operator
           end do
           call fl%Ax_vel%compute(wv, pv, fl%c_Xh, fl%msh, fl%Xh)
           call fl%gs_Xh%op(wv, n, GS_OP_ADD)
+          if (associated(bcx)) call bcx%apply(wv, n)
           do i = 1, nglb
              Av(i, j) = wv(rep(i))
           end do
