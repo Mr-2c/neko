@@ -472,7 +472,8 @@ not a guarantee of achieving the best time-to-solution. It is often
 better to fill each GPU with as many elements as possible within the
 device's memory. The indicative numbers given above (7000-10000
 elements) should be seen as the capability of Neko to scale out a
-problem across a large machine efficiently.
+problem across a large machine efficiently. To work out how many elements
+actually fit for a given case, see \ref memory-model.
 
 Finally, achieved performance depends on many factors, for example,
 the interconnect; it is therefore advisable to invest time in

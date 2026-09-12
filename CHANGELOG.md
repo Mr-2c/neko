@@ -2,6 +2,14 @@
 
 ## Develop
 
+- Added a per-rank memory model, `contrib/neko_memory_model/neko_memory_model.py`,
+  which predicts the memory footprint of a case from the allocations the code
+  makes and reports how many elements fit in a given budget. It accounts
+  separately for host-only, device-mapped and device-only allocations, so it
+  covers both replicated buffers and zero-copy mapping on unified-memory APUs
+  (`NEKO_HIP_ZEROCOPY=1`), and it tracks the transient allocations that set the
+  peak during initialisation. Documented in the new user guide page
+  `doc/pages/user-guide/memory-model.md`.
 - Added runtime registration of user-defined scalar boundary-condition types
   through `register_scalar_pnpn_bc`.
 - Added a coupled CPU BiCGStab solver for three-component vector systems.
