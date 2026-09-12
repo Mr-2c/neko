@@ -8,7 +8,9 @@
   separately for host-only, device-mapped and device-only allocations, so it
   covers both replicated buffers and zero-copy mapping on unified-memory APUs
   (`NEKO_HIP_ZEROCOPY=1`), and it tracks the transient allocations that set the
-  peak during initialisation. Documented in the new user guide page
+  peak during initialisation. The working precision is selected with
+  `--real-type`, matching all four `configure --enable-real` values
+  (`ssp`, `sp`, `dp`, `qp`). Documented in the new user guide page
   `doc/pages/user-guide/memory-model.md`.
 - Added runtime registration of user-defined scalar boundary-condition types
   through `register_scalar_pnpn_bc`.

@@ -35,13 +35,15 @@ Usage
 -----
     ./neko_memory_model.py --elements 8000 --lx 8 --budget 120GiB
     ./neko_memory_model.py --elements 8000 --lx 8 --no-zero-copy
+    ./neko_memory_model.py --elements 8000 --lx 8 --real-type sp
     ./neko_memory_model.py --fit --budget 120GiB --lx 8
     ./neko_memory_model.py --elements 8000 --lx 8 --json
 
-Defaults describe the configuration this model was written for: dealiasing on,
-DNS (no LES), CG + Jacobi for velocity, GMRES + PHMG (TreeAMG coarse grid) for
-pressure, no solution projection on either, and ``fluid_stats`` with the full
-44-field set written as a full 3D field.
+Defaults describe the configuration this model was written for: double
+precision (``--enable-real=dp``), dealiasing on, DNS (no LES), CG + Jacobi for
+velocity, GMRES + PHMG (TreeAMG coarse grid) for pressure, no solution
+projection on either, and ``fluid_stats`` with the full 44-field set written
+as a full 3D field.
 """
 
 from __future__ import annotations
@@ -164,6 +166,21 @@ MESH_BYTES_PER_POINT = 32 + 72
 #: Unique facets in a hex mesh: six per element, interior ones shared by two.
 MESH_FACETS_PER_ELEMENT = 3.0
 
+#: Working precisions selectable at configure time with ``--enable-real``,
+#: mapped to the byte width of ``rp`` (the working real) and ``xp`` (the
+#: extended real used for accumulations).  ``dp`` is the default.
+#: configure.ac:22-28,195-253, src/config/num_types.f90.in
+REAL_TYPES = {
+    "ssp": {"rp": 4, "xp": 4,
+            "desc": "rp = REAL32, xp = REAL32"},
+    "sp": {"rp": 4, "xp": 8,
+           "desc": "rp = REAL32, xp = REAL64"},
+    "dp": {"rp": 8, "xp": 8,
+           "desc": "rp = REAL64, xp = REAL64 (configure default)"},
+    "qp": {"rp": 16, "xp": 16,
+           "desc": "rp = REAL128, xp = REAL128"},
+}
+
 SI = {"B": 1, "kB": 10**3, "MB": 10**6, "GB": 10**9, "TB": 10**12,
       "KiB": 2**10, "MiB": 2**20, "GiB": 2**30, "TiB": 2**40}
 
@@ -179,7 +196,9 @@ class Config:
     nelv: int = 8000
     lx: int = 8
     lxd: int | None = None           # None -> (3*lx)//2, Neko's default
-    rp_bytes: int = 8                # 8 = double, 4 = --enable-real=sp
+
+    #: Working precision, as passed to ``configure --enable-real``.
+    real_type: str = "dp"
 
     zero_copy: bool = True
 
@@ -212,10 +231,30 @@ class Config:
     bc_objects: int = 4
 
     def __post_init__(self) -> None:
+        if self.real_type not in REAL_TYPES:
+            raise ValueError(
+                f"unknown --enable-real value '{self.real_type}'; "
+                f"expected one of {', '.join(REAL_TYPES)}")
         if self.lxd is None:
             self.lxd = (3 * self.lx) // 2
 
     # -- derived sizes ------------------------------------------------------
+
+    @property
+    def rp_bytes(self) -> int:
+        """Bytes per working real, set by ``configure --enable-real``."""
+        return REAL_TYPES[self.real_type]["rp"]
+
+    @property
+    def xp_bytes(self) -> int:
+        """Bytes per extended real.
+
+        Only ever backs fixed-size arrays -- the CPU GMRES Hessenberg and
+        rotation coefficients, and the device reduction buffers -- so it does
+        not enter the footprint at problem scale.  ``ssp`` and ``sp`` are
+        therefore the same size.
+        """
+        return REAL_TYPES[self.real_type]["xp"]
 
     @property
     def n(self) -> int:
@@ -679,6 +718,31 @@ def build_terms(cfg: Config) -> list[Term]:
              formula="n_bc * 3 * (n_bc_dofs + 1) * 4", exact=False, phase=8,
              source="src/bc/bc.f90:512-517"))
 
+    # -- device reduction buffers -------------------------------------------
+    # hip_buffer_reserve grows these to the largest reduction ever run and
+    # keeps them until device teardown.  Each is a pinned host allocation
+    # plus a device allocation; neither is a device_map, so zero-copy leaves
+    # both alone.  redbuf_xp is the only xp-typed allocation in the whole
+    # footprint that scales with the problem size, which is why `ssp` and
+    # `sp` differ at all.
+    nb = -(-n // 1024) + 1
+    terms.append(
+        Term("reductions", "glsc/glsum buffer (rp), pinned host + device",
+             host=nb * rp, device=nb * rp, phase=4,
+             formula="(ceil(n/1024) + 1) * rp, twice",
+             source="src/math/bcknd/device/hip/math.hip:765-767, "
+                    "src/device/hip/buffer.hip:47-67"))
+    terms.append(
+        Term("reductions", "glsc/glsum buffer (xp), pinned host + device",
+             host=nb * cfg.xp_bytes, device=nb * cfg.xp_bytes, phase=4,
+             formula="(ceil(n/1024) + 1) * xp, twice",
+             source="src/math/bcknd/device/hip/math.hip:769-771"))
+    terms.append(
+        Term("reductions", "CFL reduction buffer (device only)",
+             device=cfg.nelv * 8, phase=4,
+             formula="nelv * 8 (an explicit double, not rp)",
+             source="src/math/bcknd/device/hip/opr_cfl.hip:57,72"))
+
     # -- I/O ----------------------------------------------------------------
     terms.append(
         Term("i/o", "fld write staging buffer (transient)",
@@ -769,7 +833,9 @@ def report(cfg: Config, terms: list[Term], budget: int | None,
     out.append(f"  space                lx = {cfg.lx}"
                + (f", lxd = {cfg.lxd}" if cfg.dealias else " (no dealiasing)"))
     out.append(f"  dofs (n)             {cfg.n:,}")
-    out.append(f"  precision            rp = {cfg.rp_bytes} bytes")
+    out.append(f"  precision            --enable-real={cfg.real_type}"
+               f" ({REAL_TYPES[cfg.real_type]['desc']}),"
+               f" rp = {cfg.rp_bytes} B")
     out.append(f"  velocity             {cfg.vel_solver} + {cfg.vel_precon}"
                f", projection {cfg.vel_projection_dim}")
     out.append(f"  pressure             {cfg.prs_solver} + {cfg.prs_precon}"
@@ -947,12 +1013,33 @@ def selftest() -> int:
     check(Config(nelv=1, lx=8).gs_entries() == 8**3 - 6**3, "gs entry count")
     check(Config(nelv=1, lx=2).gs_entries() == 8, "gs entry count at lx=2")
 
-    # Single precision halves the real-valued part.
-    d = totals(build_terms(Config(nelv=8000, lx=8)), True)["unified_total"]
-    s = totals(build_terms(Config(nelv=8000, lx=8, rp_bytes=4)),
-               True)["unified_total"]
-    check(0.50 < s / d < 0.55,
+    # Every configure --enable-real value is modelled, and the footprint is
+    # monotone in rp with the fixed-width arrays as the only offset.
+    by_type = {rt: totals(build_terms(Config(nelv=8000, lx=8, real_type=rt)),
+                          True)["unified_total"] for rt in REAL_TYPES}
+    check(by_type["ssp"] < by_type["sp"],
+          "ssp is smaller than sp: the xp reduction buffer is narrower")
+    check((by_type["sp"] - by_type["ssp"]) < 1e-5 * by_type["sp"],
+          "...but only the reduction buffer differs, so by under 0.001%")
+    check(by_type["sp"] < by_type["dp"] < by_type["qp"],
+          "the footprint grows with rp")
+    check(0.50 < by_type["sp"] / by_type["dp"] < 0.55,
           "single precision roughly halves the footprint")
+    check(1.95 < by_type["qp"] / by_type["dp"] < 2.0,
+          "quad precision roughly doubles the footprint")
+    # Affine in rp: T(rp) = A*rp + B, with B the fixed-width arrays. Fitted
+    # on ssp/dp, where xp tracks rp, and checked against qp.
+    a = (by_type["dp"] - by_type["ssp"]) / 4
+    b = by_type["dp"] - 8 * a
+    check(abs(16 * a + b - by_type["qp"]) < 1e-6 * by_type["qp"],
+          "the footprint is affine in rp")
+    check(0 < b < 0.03 * by_type["dp"],
+          "the rp-independent part is a small positive offset")
+    try:
+        Config(real_type="fp16")
+        check(False, "an unknown --enable-real value is rejected")
+    except ValueError:
+        pass
 
     # fit_elements inverts the footprint.
     budget = 64 * 2**30
@@ -1042,8 +1129,12 @@ def main(argv: list[str] | None = None) -> int:
                    help="points per direction, order + 1 (default: 8)")
     p.add_argument("--lxd", type=int,
                    help="dealiasing points per direction (default: (3*lx)/2)")
-    p.add_argument("--single-precision", action="store_true",
-                   help="build configured with --enable-real=sp")
+    p.add_argument("--real-type", default="dp", choices=list(REAL_TYPES),
+                   help="working precision, as passed to Neko's "
+                        "configure --enable-real (default: dp)")
+    p.add_argument("--single-precision", dest="real_type",
+                   action="store_const", const="sp",
+                   help="shorthand for --real-type sp")
 
     p.add_argument("--no-zero-copy", action="store_true",
                    help="model replicated host/device buffers instead")
@@ -1099,7 +1190,7 @@ def main(argv: list[str] | None = None) -> int:
         nelv=nelv,
         lx=args.lx,
         lxd=args.lxd,
-        rp_bytes=4 if args.single_precision else 8,
+        real_type=args.real_type,
         zero_copy=not args.no_zero_copy,
         dealias=not args.no_dealias,
         vel_solver=args.velocity_solver,
