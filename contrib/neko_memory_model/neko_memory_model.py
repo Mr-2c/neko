@@ -181,6 +181,13 @@ REAL_TYPES = {
            "desc": "rp = REAL128, xp = REAL128"},
 }
 
+#: Real types the device backends can actually map.  ``device_map_r1..r4``
+#: select-type only on integer, integer(i8), real (REAL32) and double
+#: precision, and raise neko_error('Unknown Fortran type') otherwise, so a
+#: REAL128 build aborts at the first device_map -- before any of this model's
+#: numbers would be reached.  src/device/device.F90:926-940
+DEVICE_REAL_TYPES = ("ssp", "sp", "dp")
+
 SI = {"B": 1, "kB": 10**3, "MB": 10**6, "GB": 10**9, "TB": 10**12,
       "KiB": 2**10, "MiB": 2**20, "GiB": 2**30, "TiB": 2**40}
 
@@ -406,14 +413,20 @@ def _gather_scatter(cfg: Config, lx: int, label: str,
              source="src/gs/gather_scatter.f90:1341-1351, "
                     "src/gs/bcknd/device/gs_device.F90:335-364"),
         Term("gather-scatter", f"{label}: block length/offset tables",
-             mapped=2 * nb * 4, phase=phase,
-             formula="2 * nblks * 4", exact=False,
+             mapped=4 * nb * 4, phase=phase,
+             formula="4 * nblks * 4 (len + off, local + shared)", exact=False,
              source="src/gs/gather_scatter.f90:1429-1467"),
         # gs_device_mpi: buf_d (rp) + buf_v_d (3 rp) + dof_d (i4), send & recv
-        Term("gather-scatter", f"{label}: MPI exchange buffers (device)",
+        # gs_comm_switch frees the old backend before allocating the new
+        # one (src/gs/gs_tune.f90:361-363), so exactly one comm backend is
+        # resident.  Sized here as the device MPI backend; the host backend
+        # the autotuner starts from costs a comparable 8*rp*m_shared, but on
+        # the host side.
+        Term("gather-scatter", f"{label}: halo exchange buffers (one backend)",
              device=2 * m_s * (rp * (1 + GS_VEC_NC) + 4), phase=phase,
              formula="2 * m_shared * ((1 + GS_VEC_NC) * rp + 4)", exact=False,
-             source="src/gs/bcknd/device/gs_device_mpi.F90:264-277"),
+             source="src/gs/bcknd/device/gs_device_mpi.F90:264-277, "
+                    "src/gs/gs_mpi.f90:110-123"),
         Term("gather-scatter", f"{label}: MPI peer dof lists (host)",
              host=2 * m_s * 4, phase=phase,
              formula="2 * m_shared * 4", exact=False,
@@ -717,26 +730,58 @@ def build_terms(cfg: Config) -> list[Term]:
              mapped=cfg.bc_objects * 3 * (cfg.bc_dofs + 1) * 4,
              formula="n_bc * 3 * (n_bc_dofs + 1) * 4", exact=False, phase=8,
              source="src/bc/bc.f90:512-517"))
+    # fluid_pnpn always builds two facet_normal_t (bc_prs_surface and
+    # bc_sym_surface), each holding four rp vector_t over its unique mask
+    # plus the mask itself.  These are the only rp-typed bc arrays.
+    terms.append(
+        Term("boundary conditions", "facet_normal surface terms (2 x 4 rp "
+             "vectors + masks)",
+             mapped=2 * (4 * cfg.bc_dofs * rp + 2 * (cfg.bc_dofs + 1) * 4),
+             formula="2 * (4 * n_unique * rp + 2 * (n_unique + 1) * 4)",
+             exact=False, phase=8,
+             source="src/bc/facet_normal.f90:58,276-283, "
+                    "src/fluid/fluid_pnpn.f90:138,141"))
 
     # -- device reduction buffers -------------------------------------------
-    # hip_buffer_reserve grows these to the largest reduction ever run and
-    # keeps them until device teardown.  Each is a pinned host allocation
-    # plus a device allocation; neither is a device_map, so zero-copy leaves
-    # both alone.  redbuf_xp is the only xp-typed allocation in the whole
-    # footprint that scales with the problem size, which is why `ssp` and
-    # `sp` differ at all.
-    nb = -(-n // 1024) + 1
+    # hip_buffer_reserve only ever grows these, and keeps them until device
+    # teardown, so each reaches the high-water mark over every call site.
+    # Each is a pinned host allocation plus a device allocation; neither is a
+    # device_map, so zero-copy leaves both alone.  redbuf_xp is the only
+    # xp-typed allocation that scales with the problem size, so it is the
+    # whole of the difference between `ssp` and `sp`.
+    nb_1024 = -(-n // 1024) + 1
     terms.append(
         Term("reductions", "glsc/glsum buffer (rp), pinned host + device",
-             host=nb * rp, device=nb * rp, phase=4,
+             host=nb_1024 * rp, device=nb_1024 * rp, phase=4,
              formula="(ceil(n/1024) + 1) * rp, twice",
-             source="src/math/bcknd/device/hip/math.hip:765-767, "
+             source="src/math/bcknd/device/hip/math.hip:765-767,868, "
                     "src/device/hip/buffer.hip:47-67"))
+
+    # glsc3_many reserves j*ceil(n/nt) with nt = 1024/next_pow2(j), which for
+    # GMRES's j = m_restart dwarfs every other reduction: at j = 30 it is
+    # 30*ceil(n/32), about 0.94*n elements.  Reached through the
+    # orthogonalisation at gmres_device.F90:415 on HIP and CUDA.
+    xp_elements = nb_1024
+    if cfg.prs_solver == "gmres" or cfg.vel_solver == "gmres":
+        j = GMRES_RESTART
+        nt = 1024 // next_pow2(j)
+        xp_elements = max(xp_elements, j * -(-n // nt) + 1)
     terms.append(
-        Term("reductions", "glsc/glsum buffer (xp), pinned host + device",
-             host=nb * cfg.xp_bytes, device=nb * cfg.xp_bytes, phase=4,
-             formula="(ceil(n/1024) + 1) * xp, twice",
-             source="src/math/bcknd/device/hip/math.hip:769-771"))
+        Term("reductions", "glsc3_many buffer (xp), pinned host + device",
+             host=xp_elements * cfg.xp_bytes,
+             device=xp_elements * cfg.xp_bytes, phase=6,
+             formula="(j * ceil(n / (1024/next_pow2(j))) + 1) * xp, twice, "
+                     "j = GMRES restart",
+             source="src/math/bcknd/device/hip/math.hip:769-771,928-935, "
+                    "src/krylov/bcknd/device/gmres_device.F90:415"))
+
+    if cfg.prs_solver == "gmres" or cfg.vel_solver == "gmres":
+        terms.append(
+            Term("reductions", "gmres_part2 buffer (rp), pinned host + device",
+                 host=(nb_1024 - 1) * rp, device=(nb_1024 - 1) * rp, phase=6,
+                 formula="ceil(n/1024) * rp, twice",
+                 source="src/krylov/bcknd/device/hip/gmres_aux.hip:56,64"))
+
     terms.append(
         Term("reductions", "CFL reduction buffer (device only)",
              device=cfg.nelv * 8, phase=4,
@@ -845,6 +890,13 @@ def report(cfg: Config, terms: list[Term], budget: int | None,
                    + ", ".join(str(x) for x in cfg.phmg_levels)
                    + f"; TreeAMG coarse grid, {cfg.tamg_levels} levels")
     out.append(f"  statistics           {cfg.stats}")
+    if cfg.real_type not in DEVICE_REAL_TYPES:
+        out.append(f"  !! --enable-real={cfg.real_type} cannot run on a device"
+                   " build: device_map has no")
+        out.append("     branch for REAL128 and raises 'Unknown Fortran type'"
+                   " (device.F90:926-940).")
+        out.append("     The figures below are the footprint such a build"
+                   " would have had.")
     out.append("  zero-copy            "
                + ("on (NEKO_HIP_ZEROCOPY=1)" if cfg.zero_copy
                   else "off (replicated buffers)"))
@@ -1018,9 +1070,16 @@ def selftest() -> int:
     by_type = {rt: totals(build_terms(Config(nelv=8000, lx=8, real_type=rt)),
                           True)["unified_total"] for rt in REAL_TYPES}
     check(by_type["ssp"] < by_type["sp"],
-          "ssp is smaller than sp: the xp reduction buffer is narrower")
-    check((by_type["sp"] - by_type["ssp"]) < 1e-5 * by_type["sp"],
-          "...but only the reduction buffer differs, so by under 0.001%")
+          "ssp is smaller than sp: the xp reduction buffers are narrower")
+    check((by_type["sp"] - by_type["ssp"]) < 0.01 * by_type["sp"],
+          "...but only the reduction buffers differ, so by under 1%")
+    # And that whole difference is GMRES's glsc3_many high-water mark: with a
+    # solver that never calls it, ssp and sp converge.
+    cg = {rt: totals(build_terms(Config(nelv=8000, lx=8, real_type=rt,
+                                        prs_solver="cg", vel_solver="cg")),
+                     True)["unified_total"] for rt in ("ssp", "sp")}
+    check((cg["sp"] - cg["ssp"]) < 2e-3 * (by_type["sp"] - by_type["ssp"]),
+          "without GMRES the ssp/sp gap all but vanishes")
     check(by_type["sp"] < by_type["dp"] < by_type["qp"],
           "the footprint grows with rp")
     check(0.50 < by_type["sp"] / by_type["dp"] < 0.55,
@@ -1040,6 +1099,17 @@ def selftest() -> int:
         check(False, "an unknown --enable-real value is rejected")
     except ValueError:
         pass
+    check(set(DEVICE_REAL_TYPES) < set(REAL_TYPES),
+          "some real types are not device-mappable")
+    qp_report = report(Config(nelv=100, lx=4, real_type="qp"),
+                       build_terms(Config(nelv=100, lx=4, real_type="qp")),
+                       None, False)
+    check("cannot run on a device build" in qp_report,
+          "the report warns that qp cannot run on a device")
+    dp_cfg = Config(nelv=100, lx=4)
+    dp_report = report(dp_cfg, build_terms(dp_cfg), None, False)
+    check("cannot run on a device build" not in dp_report,
+          "...and does not warn for a type that can")
 
     # fit_elements inverts the footprint.
     budget = 64 * 2**30

@@ -10,8 +10,9 @@
   (`NEKO_HIP_ZEROCOPY=1`), and it tracks the transient allocations that set the
   peak during initialisation. The working precision is selected with
   `--real-type`, matching all four `configure --enable-real` values
-  (`ssp`, `sp`, `dp`, `qp`). Documented in the new user guide page
-  `doc/pages/user-guide/memory-model.md`.
+  (`ssp`, `sp`, `dp`, `qp`), and the tool warns that `qp` cannot run on a
+  device build at all, since `device_map` has no REAL128 branch. Documented
+  in the new user guide page `doc/pages/user-guide/memory-model.md`.
 - Added runtime registration of user-defined scalar boundary-condition types
   through `register_scalar_pnpn_bc`.
 - Added a coupled CPU BiCGStab solver for three-component vector systems.

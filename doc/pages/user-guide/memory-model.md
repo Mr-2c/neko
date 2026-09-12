@@ -35,8 +35,9 @@ On an APU there is one physical pool, so what has to fit is
 \f]
 
 where \f$H\f$ is the host-only total, \f$D\f$ the device-only total and
-\f$M_\mathrm{mapped}\f$ the mapped total. Because mapped arrays are 98% of
-the footprint, zero-copy is very close to a factor of two in capacity.
+\f$M_\mathrm{mapped}\f$ the mapped total. Because mapped arrays are 97.8% of
+the footprint, zero-copy is very close to a factor of two in capacity —
+measured at 1.98x for the reference case.
 
 On a discrete GPU the same three numbers split instead as
 \f$M_\mathrm{mapped} + D\f$ on the device and \f$M_\mathrm{mapped} + H\f$ on
@@ -83,9 +84,9 @@ written as a full 3D field (`avg_direction = none`).
 | Gather-scatter | \f$m_l(\mathrm{rp}{+}8) + m_s(4\,\mathrm{rp}{+}8)\f$ | 2.1 | `gather_scatter.f90`, `gs_device*.F90` |
 | fld write staging | \f$3n \cdot 4\f$ B, or \f$3n \cdot 8\f$ at `dp` output precision | 1.5 | `fld_file.f90:344-346` |
 | Mesh connectivity | \f$\approx 300\f$ B per element + two hash tables | 0.4 | `mesh.f90:88-137` |
-| Reduction buffers | \f$\lceil n/1024\rceil\f$ elements of `rp` and of `xp`, pinned host + device | 0.01 | `math.hip:765-771` |
-| Boundary masks | \f$\propto\f$ boundary dofs | 0.1 | `bc.f90:512-517` |
-| **Total** | | **279** | |
+| Reduction buffers | high-water over every call site; `glsc3_many` dominates at \f$j\lceil n/32\rceil\f$ `xp` for GMRES's \f$j=30\f$ | 1.9 | `math.hip:765-771,928-935` |
+| Boundary masks and `facet_normal` vectors | \f$\propto\f$ boundary dofs | 0.2 | `bc.f90:512-517`, `facet_normal.f90:58` |
+| **Total** | | **281** | |
 
 Some consequences worth reading off the table:
 
@@ -113,19 +114,19 @@ Some consequences worth reading off the table:
 ## What fits {#memory-model-capacity}
 
 Per-dof cost is nearly flat in `lx`, which makes the capacity easy to
-remember: with this configuration in double precision, **about 2.2 kB per dof
-with zero-copy and 4.4 kB without**.
+remember: with this configuration in double precision, **about 2.25 kB per dof
+with zero-copy and 4.5 kB without**.
 
 Elements and dofs per rank fitting in 100 GiB, the model's default
 configuration, in double precision:
 
 | `lx` | `lxd` | elements, zero-copy | dofs, zero-copy | elements, replicated | dofs, replicated |
 | ---- | ----- | ------------------- | --------------- | -------------------- | ---------------- |
-| 4  | 6  | 675,460 | 43.2 M | 342,586 | 21.9 M |
-| 6  | 9  | 217,364 | 47.0 M | 109,644 | 23.7 M |
-| 8  | 12 |  94,006 | 48.1 M |  47,325 | 24.2 M |
-| 10 | 15 |  48,610 | 48.6 M |  24,458 | 24.5 M |
-| 12 | 18 |  28,271 | 48.9 M |  14,222 | 24.6 M |
+| 4  | 6  | 670,214 | 42.9 M | 340,939 | 21.8 M |
+| 6  | 9  | 215,718 | 46.6 M | 109,168 | 23.6 M |
+| 8  | 12 |  93,310 | 47.8 M |  47,131 | 24.1 M |
+| 10 | 15 |  48,255 | 48.3 M |  24,361 | 24.4 M |
+| 12 | 18 |  28,067 | 48.5 M |  14,167 | 24.5 M |
 
 100 GiB is an illustrative budget, not a machine constant: substitute the
 memory actually available to a rank, which on an APU is the physical pool
@@ -141,9 +142,9 @@ Four values are accepted (`configure.ac:22-28,195-253`):
 | `--enable-real` | `rp` | `xp` | Footprint vs `dp` |
 | --------------- | ---- | ---- | ----------------- |
 | `ssp` | REAL32, 4 B | REAL32, 4 B | 0.508x |
-| `sp`  | REAL32, 4 B | REAL64, 8 B | 0.508x |
+| `sp`  | REAL32, 4 B | REAL64, 8 B | 0.512x |
 | `dp`  | REAL64, 8 B | REAL64, 8 B | 1.000x (default) |
-| `qp`  | REAL128, 16 B | REAL128, 16 B | 1.983x |
+| `qp`  | REAL128, 16 B | REAL128, 16 B | 1.983x, but see the warning below |
 
 The footprint is affine in `rp`, \f$M = A\,\mathrm{rp} + B\f$, with \f$B\f$
 — the integer index arrays, the mesh, the dofmap's global ids and the `dp`
@@ -151,28 +152,42 @@ point coordinates — only about 1.6% of the `dp` total. That is why halving
 `rp` takes 50.8% rather than exactly 50%, and doubling it takes 1.98x rather
 than 2x.
 
-`ssp` and `sp` differ by 32 kB at four million dofs — 0.0007%. `xp` is the
-extended real used for accumulating reductions, and the only allocation of
-that type which scales with the problem is the device reduction buffer at
-\f$\lceil n/1024\rceil\f$ elements
-(`src/math/bcknd/device/hip/math.hip:769`). Everything else typed `xp` is
-fixed-size: the CPU GMRES Hessenberg and Givens arrays, at `m_restart`
-(`src/krylov/bcknd/cpu/gmres.f90:61-66`). So choose between `ssp` and `sp` on
-numerical grounds, not memory ones.
+\warning `--enable-real=qp` **cannot run on a device build at all.** The
+`device_map` overloads select-type on `integer`, `integer(i8)`, `real`
+(REAL32) and `double precision`, and every other kind falls through to
+`neko_error('Unknown Fortran type')` (`src/device/device.F90:926-940`). A
+REAL128 build aborts at the first `device_map`, which is `field_init_common`
+— long before any of these figures would be reached. The `qp` row is what
+such a build *would* cost, and the tool prints a warning when asked for it.
 
-\warning `qp` sets the device kernels' `real` typedef to `long double`
-(`configure.ac:227-236`, `src/device/device_config.h.in`), which HIP and CUDA
-do not support in device code. It is a CPU configuration; the `qp` row is
-given for completeness.
+#### `ssp` versus `sp` is a GMRES artefact
+
+`xp` is the extended real used for accumulating reductions. Exactly one
+allocation of that type scales with the problem size: the device reduction
+buffer `redbuf_xp`. Its high-water mark is set by `glsc3_many`, which
+reserves \f$j\lceil n/n_t\rceil\f$ elements with
+\f$n_t = 1024/2^{\lceil \log_2 j\rceil}\f$
+(`src/math/bcknd/device/hip/math.hip:928-935`). The device GMRES calls it
+during orthogonalisation with \f$j\f$ running up to `m_restart = 30`
+(`gmres_device.F90:415`), giving \f$30\lceil n/32\rceil \approx 0.94\,n\f$
+elements — pinned host *and* device, so nearly two full solution fields, and
+neither half collapsed by zero-copy.
+
+That single buffer is the whole of the `ssp`/`sp` difference: 0.65% with
+GMRES on the pressure, and 0.001% with a solver that never calls
+`glsc3_many`. Everything else typed `xp` is fixed-size — the CPU GMRES
+Hessenberg and Givens arrays at `m_restart`
+(`src/krylov/bcknd/cpu/gmres.f90:61-66`). So `ssp` buys you well under a
+percent, and the choice between it and `sp` belongs on numerical grounds.
 
 #### Elements per rank at `lx = 8`, `lxd = 12`
 
 | `--enable-real` | 100 GB, zero-copy | 100 GB, replicated | 100 GiB, zero-copy | 100 GiB, replicated | B/dof |
 | --------------- | ----------------- | ------------------ | ------------------ | ------------------- | ----- |
-| `ssp` | 172,297 | 87,300 | 185,034 | 93,746 | 1134 |
-| `sp`  | 172,296 | 87,300 | 185,032 | 93,746 | 1134 |
-| `dp`  |  87,541 | 44,072 |  94,006 | 47,325 | 2231 |
-| `qp`  |  44,121 | 22,141 |  47,378 | 23,774 | 4427 |
+| `ssp` | 170,990 | 86,919 | 183,630 | 93,338 | 1142 |
+| `sp`  | 169,872 | 86,630 | 182,429 | 93,027 | 1150 |
+| `dp`  |  86,893 | 43,891 |  93,310 | 47,131 | 2248 |
+| `qp`  |  43,798 | 22,053 |  47,031 | 23,680 | 4459 |
 
 Both budget columns are given because 100 GB (decimal) is 93.1 GiB — a 7%
 difference, which is about 6,000 elements here.
@@ -233,6 +248,13 @@ allocation size; `--provenance` states each one. The main ones are:
 - **The scratch registry peak**, taken as the eight fields the pnpn pressure
   residual holds at once. A user file or simulation component that requests
   more raises it.
+- **Which gather-scatter comm. backend is resident.** Exactly one is
+  (`gs_comm_switch` frees the old before allocating the new,
+  `src/gs/gs_tune.f90:361-363`), but with `NEKO_GS_COMM` unset the autotuner
+  picks it at runtime. The model sizes the device MPI backend; the host
+  backend the tuning starts from costs a comparable amount on the host side.
+- **The boundary-condition terms**, which scale with a boundary-dof count the
+  model estimates rather than derives from the mesh.
 
 Not modelled at all: the HIP runtime's own allocations and page tables, MPI
 internal buffers, the mesh file read, restart-from-checkpoint (which holds a
