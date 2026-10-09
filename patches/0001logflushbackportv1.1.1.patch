@@ -1,0 +1,489 @@
+From 919445884f55cfe406df22e4e3d440692cc1b12a Mon Sep 17 00:00:00 2001
+From: Mr-2c <158831365+Mr-2c@users.noreply.github.com>
+Date: Fri, 11 Sep 2026 11:54:33 +0000
+Subject: [PATCH] Flush log output during initialization, around file output,
+ and on errors
+
+Backport of upstream PR #2643 (squash-merge 760f0690d2f) onto the v1.1.1
+release tag. The PR merged into `develop` about seven hours before v1.1.1
+was published, but the release was not cut from that line, so v1.1.1 does
+not contain it.
+
+Adds deterministic, event-based flushing so the log survives a process
+death (crash, OOM-kill, scheduler kill) instead of being discarded from
+the Fortran runtime's I/O buffer:
+
+* `log_t` gains a `flush()` type-bound procedure, guarded on rank 0 and
+  never collective.
+* Log level parameters move above the type so the components can carry
+  default initializers; `log_free` now flushes and resets the unit to
+  stdout.
+* The banner, warnings and the C interface entry points flush after
+  writing; `log_error` flushes the buffered log and then routes through
+  `neko_error`.
+* The four error routines in `utils.f90` flush `output_unit` before
+  reporting and `error_unit` before `error stop`; `neko_warning` flushes
+  after writing.
+* The boundary-condition validation errors in `fluid_pnpn` and
+  `scalar_pnpn` go through `neko_error` instead of writing to
+  `error_unit` directly.
+* `output_controller_execute` and the joblimit checkpoint flush around
+  file writes.
+
+Backport notes, relative to the upstream commit:
+
+* `src/scalar/scalar_pnpn.f90` - upstream's context imports
+  `BC_DIRICHLET` from `bc`, which does not exist on v1.1.1. The v1.1.1
+  import is kept and only `use utils, only : neko_error` is added.
+* `src/.depends` - `common/utils.lo` is added to the v1.1.1 form of the
+  `scalar/scalar_pnpn.lo` line.
+
+All other hunks apply unmodified; `log.f90` and `utils.f90` are
+byte-identical to the upstream merged versions.
+
+Co-authored-by: Timofey Mukha <timofey.mukha@fau.de>
+Co-authored-by: Tim Felle Olsen <tife@dtu.dk>
+Co-authored-by: Niclas Jansson <njansson@kth.se>
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01EUJhHRGhLYbDrF5GG2Exyu
+---
+ src/.depends                 |  2 +-
+ src/common/log.f90           | 58 +++++++++++++++++++++++++-----------
+ src/common/utils.f90         | 16 ++++++++++
+ src/fluid/fluid_pnpn.f90     | 14 ++++-----
+ src/io/output_controller.f90 |  2 ++
+ src/neko.f90                 |  2 ++
+ src/scalar/scalar_pnpn.f90   | 17 +++++++----
+ src/simulation.f90           |  6 ++--
+ 8 files changed, 84 insertions(+), 33 deletions(-)
+
+diff --git a/src/.depends b/src/.depends
+index a5f5fb153c9..a9dc917abe4 100644
+--- a/src/.depends
++++ b/src/.depends
+@@ -355,7 +355,7 @@ scalar/bcknd/device/scalar_residual_device.lo : scalar/bcknd/device/scalar_resid
+ scalar/scalar_scheme.lo : scalar/scalar_scheme.f90 device/device.lo common/time_state.lo registries/scratch_registry.lo common/time_step_controller.lo config/neko_config.lo math/field_math.lo field/field_series.lo scalar/scalar_source_term.lo common/utils.lo common/user_intf.lo common/json_utils.lo registries/registry.lo common/log.lo time_schemes/time_scheme_controller.lo mesh/mesh.lo krylov/precon.lo bc/bc.lo bc/bc_list.lo krylov/pc_hsmg.lo krylov/bcknd/sx/pc_jacobi_sx.lo krylov/bcknd/device/pc_jacobi_device.lo krylov/bcknd/cpu/pc_jacobi.lo sem/coef.lo krylov/krylov.lo sem/dofmap.lo sem/space.lo field/field_list.lo field/field.lo config/num_types.lo common/checkpoint.lo gs/gather_scatter.lo 
+ scalar/scalar_scheme_fctry.lo : scalar/scalar_scheme_fctry.f90 common/utils.lo scalar/scalar_pnpn.lo scalar/scalar_scheme.lo 
+ scalar/scalars.lo : scalar/scalars.f90 common/time_state.lo sem/coef.lo common/utils.lo common/user_intf.lo common/log.lo krylov/krylov.lo common/checkpoint.lo field/field_series.lo field/field_list.lo field/field.lo common/json_utils.lo common/time_step_controller.lo time_schemes/time_scheme_controller.lo gs/gather_scatter.lo sem/space.lo mesh/mesh.lo scalar/scalar_aux.lo scalar/scalar_scheme.lo scalar/scalar_pnpn.lo config/num_types.lo 
+-scalar/scalar_pnpn.lo : scalar/scalar_pnpn.f90 comm/comm.lo bc/bc.lo common/time_state.lo common/time_step_controller.lo bc/zero_dirichlet.lo config/neko_config.lo common/user_intf.lo common/json_utils.lo common/profiler.lo fluid/advection.lo common/log.lo math/math.lo common/projection.lo time_schemes/time_scheme_controller.lo math/bcknd/device/device_math.lo krylov/krylov.lo bc/facet_normal.lo field/field_series.lo math/ax.lo scalar/scalar_residual.lo gs/gather_scatter.lo device/device.lo sem/coef.lo mesh/mesh.lo bc/bc_list.lo field/field.lo common/checkpoint.lo scalar/scalar_scheme.lo common/rhs_maker.lo config/num_types.lo 
++scalar/scalar_pnpn.lo : scalar/scalar_pnpn.f90 comm/comm.lo bc/bc.lo common/utils.lo common/time_state.lo common/time_step_controller.lo bc/zero_dirichlet.lo config/neko_config.lo common/user_intf.lo common/json_utils.lo common/profiler.lo fluid/advection.lo common/log.lo math/math.lo common/projection.lo time_schemes/time_scheme_controller.lo math/bcknd/device/device_math.lo krylov/krylov.lo bc/facet_normal.lo field/field_series.lo math/ax.lo scalar/scalar_residual.lo gs/gather_scatter.lo device/device.lo sem/coef.lo mesh/mesh.lo bc/bc_list.lo field/field.lo common/checkpoint.lo scalar/scalar_scheme.lo common/rhs_maker.lo config/num_types.lo 
+ scalar/scalar_pnpn_bc_fctry.lo : scalar/scalar_pnpn_bc_fctry.f90 bc/overset_interface.lo bc/field_neumann.lo bc/field_dirichlet.lo common/utils.lo common/user_intf.lo bc/neumann.lo bc/dirichlet.lo scalar/scalar_pnpn.lo 
+ scalar/scalar_aux.lo : scalar/scalar_aux.f90 common/time_state.lo common/utils.lo common/log.lo krylov/krylov.lo 
+ scalar/scalar_residual.lo : scalar/scalar_residual.f90 config/num_types.lo mesh/mesh.lo sem/space.lo bc/facet_normal.lo sem/coef.lo field/field.lo math/ax.lo gs/gather_scatter.lo 
+diff --git a/src/common/log.f90 b/src/common/log.f90
+index e4aabf86630..6e6faaf8c15 100644
+--- a/src/common/log.f90
++++ b/src/common/log.f90
+@@ -48,12 +48,19 @@ module logger
+   !> Length of the section header
+   integer, public, parameter :: SEC_HEAD_SIZE = 30
+ 
++  ! Possible levels of logging
++  integer, public, parameter :: NEKO_LOG_QUIET = 0 !< Always
++  integer, public, parameter :: NEKO_LOG_INFO = 1 !< Default
++  integer, public, parameter :: NEKO_LOG_VERBOSE = 2 !< Verbose
++  integer, public, parameter :: NEKO_LOG_DEPRECATION = 5 !< Deprecation
++  integer, public, parameter :: NEKO_LOG_DEBUG = 10 !< Debug
++
+   type, public :: log_t
+-     integer, private :: indent_
+-     integer, private :: section_id_
+-     integer, private :: tab_size_
+-     integer, private :: level_
+-     integer, private :: unit_
++     integer, private :: indent_ = 0
++     integer, private :: section_id_ = 0
++     integer, private :: tab_size_ = 1
++     integer, private :: level_ = NEKO_LOG_INFO
++     integer, private :: unit_ = stdout
+ 
+      character(len=LOG_SIZE), private :: section_header = ""
+ 
+@@ -71,6 +78,7 @@ module logger
+      procedure, pass(this) :: warning => log_warning
+      procedure, pass(this) :: deprecated => log_deprecated
+      procedure, pass(this) :: end_section => log_end_section
++     procedure, pass(this) :: flush => log_flush
+ 
+      procedure, private, pass(this) :: print_section_header => &
+           log_print_section_header
+@@ -78,16 +86,6 @@ module logger
+ 
+   !> Global log stream
+   type(log_t), public :: neko_log
+-  !> Always logged
+-  integer, public, parameter :: NEKO_LOG_QUIET = 0
+-  !> Default log level
+-  integer, public, parameter :: NEKO_LOG_INFO = 1
+-  !> Verbose log level
+-  integer, public, parameter :: NEKO_LOG_VERBOSE = 2
+-  !> Deprecation log level
+-  integer, public, parameter :: NEKO_LOG_DEPRECATION = 5
+-  !> Debug log level
+-  integer, public, parameter :: NEKO_LOG_DEBUG = 10
+ 
+   !> List of already logged deprecated features
+   character(len=50), dimension(:), allocatable :: deprecated_list
+@@ -134,6 +132,9 @@ contains
+     class(log_t), intent(inout) :: this
+     integer :: i
+ 
++    ! Flush the log before closing off.
++    call this%flush()
++
+     if (this%section_id_ .ne. 0) then
+        call neko_error("Log is unbalanced")
+     end if
+@@ -152,8 +153,10 @@ contains
+     end if
+ 
+     this%indent_ = 0
++    this%section_id_ = 0
++    this%tab_size_ = 1
+     this%level_ = NEKO_LOG_INFO
+-    this%unit_ = -1
++    this%unit_ = stdout
+ 
+     if (allocated(deprecated_list)) then
+        deallocate(deprecated_list)
+@@ -161,6 +164,21 @@ contains
+ 
+   end subroutine log_free
+ 
++  !> Flush the log stream, ensuring buffered output leaves the process
++  !! @note Flushing is local to rank 0 (the only writer) and never collective,
++  !! so it is safe to call from any rank.
++  subroutine log_flush(this)
++    class(log_t), intent(in) :: this
++
++    ! The unit is compared against the sentinel value set by `log_free`, and
++    ! not simply tested for being positive, since NEWUNIT-assigned units
++    ! (used for NEKO_LOG_FILE) are always negative
++    if (pe_rank .eq. 0) then
++       flush(this%unit_)
++    end if
++
++  end subroutine log_flush
++
+   !> Increase indention level
+   subroutine log_begin(this)
+     class(log_t), intent(inout) :: this
+@@ -265,6 +283,7 @@ contains
+        write(this%unit_, '(1X,A,A,A)') '(version: ', trim(version), ')'
+        write(this%unit_, '(1X,A)') trim(build_info)
+        write(this%unit_, '(A)') ''
++       flush(this%unit_)
+     end if
+ 
+   end subroutine log_header
+@@ -275,8 +294,9 @@ contains
+     character(len=*), intent(in) :: msg
+ 
+     if (pe_rank .eq. 0) then
++       call this%flush()
+        call this%indent()
+-       write(stderr, '(A,A,A)') '*** ERROR: ', trim(msg), '  ***'
++       call neko_error(trim(msg))
+     end if
+ 
+   end subroutine log_error
+@@ -289,6 +309,7 @@ contains
+     if (pe_rank .eq. 0) then
+        call this%indent()
+        write(this%unit_, '(A,A,A)') '*** WARNING: ', trim(msg), '  ***'
++       call this%flush()
+     end if
+ 
+   end subroutine log_warning
+@@ -475,8 +496,10 @@ contains
+           msg(len:len) = c_msg(len)
+        end do
+ 
++       call neko_log%flush()
+        call neko_log%indent()
+        write(stderr, '(A,A,A)') '*** ERROR: ', trim(msg(1:len)), '  ***'
++       flush(stderr)
+     end if
+ 
+   end subroutine log_error_c
+@@ -500,6 +523,7 @@ contains
+        call neko_log%indent()
+        write(neko_log%unit_, '(A,A,A)') &
+             '*** WARNING: ', trim(msg(1:len)), '  ***'
++       call neko_log%flush()
+     end if
+ 
+   end subroutine log_warning_c
+diff --git a/src/common/utils.f90 b/src/common/utils.f90
+index 0efd9c41f37..5ea15a2a179 100644
+--- a/src/common/utils.f90
++++ b/src/common/utils.f90
+@@ -337,11 +337,17 @@ contains
+   subroutine neko_error_plain(error_code)
+     integer, optional :: error_code
+ 
++    ! Persist buffered log output before aborting, such that the error
++    ! appears after any preceding log messages
++    flush(output_unit)
++
+     if (present(error_code)) then
+        write(error_unit, *) '*** ERROR ***', error_code
++       flush(error_unit)
+        error stop
+     else
+        write(error_unit, *) '*** ERROR ***'
++       flush(error_unit)
+        error stop
+     end if
+ 
+@@ -351,7 +357,12 @@ contains
+   !! @param error_msg The error message to report.
+   subroutine neko_error_msg(error_msg)
+     character(len=*) :: error_msg
++
++    ! Persist buffered log output before aborting, such that the error
++    ! appears after any preceding log messages
++    flush(output_unit)
+     write(error_unit, *) '*** ERROR: ', trim(error_msg), ' ***'
++    flush(error_unit)
+     error stop
+   end subroutine neko_error_msg
+ 
+@@ -367,12 +378,14 @@ contains
+     character(len=*), intent(in) :: known_types(:)
+     integer :: i
+ 
++    flush(output_unit)
+     write(error_unit, *) '*** ERROR WHEN SELECTING TYPE ***'
+     write(error_unit, *) 'Type ', wrong_type, ' does not exist for ', base_type
+     write(error_unit, *) 'Valid types are:'
+     do i = 1, size(known_types)
+        write(error_unit, *) "    ", known_types(i)
+     end do
++    flush(error_unit)
+     error stop
+   end subroutine neko_type_error
+ 
+@@ -381,6 +394,7 @@ contains
+     character(len=*), intent(in) :: wrong_type
+     logical, intent(in) :: known
+ 
++    flush(output_unit)
+     write(error_unit, *) '*** ERROR WHEN REGISTERING TYPE ***'
+     write(error_unit, *) 'Type name ', wrong_type, &
+          ' conflicts with and already existing ', base_type, " type"
+@@ -390,6 +404,7 @@ contains
+        write(error_unit, *) 'The already existing type is also custom.' // &
+             ' Make all custom type names unique!'
+     end if
++    flush(error_unit)
+     error stop
+   end subroutine neko_type_registration_error
+ 
+@@ -397,6 +412,7 @@ contains
+   subroutine neko_warning(warning_msg)
+     character(len=*) :: warning_msg
+     write(output_unit, *) '*** WARNING: ', trim(warning_msg), ' ***'
++    flush(output_unit)
+   end subroutine neko_warning
+ 
+   !> Concatenate an array of strings into one string with array items
+diff --git a/src/fluid/fluid_pnpn.f90 b/src/fluid/fluid_pnpn.f90
+index c93629615a0..7ef1ca08fea 100644
+--- a/src/fluid/fluid_pnpn.f90
++++ b/src/fluid/fluid_pnpn.f90
+@@ -32,7 +32,6 @@
+ !
+ !> Modular version of the Classic Nek5000 Pn/Pn formulation for fluids
+ module fluid_pnpn
+-  use, intrinsic :: iso_fortran_env, only : error_unit
+   use coefs, only : coef_t
+   use symmetry, only : symmetry_t
+   use registry, only : neko_registry
+@@ -966,6 +965,7 @@ contains
+     ! Monitor which boundary zones have been marked
+     logical, allocatable :: marked_zones(:)
+     integer, allocatable :: zone_indices(:)
++    character(len=256) :: error_msg
+ 
+     ! For ALE, we set a flag while reading the BCs
+     character(len=:), allocatable :: bc_type_str
+@@ -1032,22 +1032,22 @@ contains
+                   MPI_INTEGER, MPI_MAX, NEKO_COMM, ierr)
+ 
+              if (global_zone_size .eq. 0) then
+-                write(error_unit, '(A, A, I0, A, A, I0, A)') "*** ERROR ***: ",&
++                write(error_msg, '(A, I0, A, A, I0, A)') &
+                      "Zone index ", zone_indices(j), &
+                      " is invalid as this zone has 0 size, meaning it ", &
+                      "is not in the mesh. Check fluid boundary condition ", &
+                      i, "."
+-                error stop
++                call neko_error(error_msg)
+              end if
+ 
+              if (marked_zones(zone_indices(j))) then
+-                write(error_unit, '(A, A, I0, A, A, A, A)') "*** ERROR ***: ", &
++                write(error_msg, '(A, I0, A, A, A, A)') &
+                      "Zone with index ", zone_indices(j), &
+                      " has already been assigned a boundary condition. ", &
+                      "Please check your boundary_conditions entry for the ", &
+                      "fluid and make sure that each zone index appears only ", &
+                      "in a single boundary condition."
+-                error stop
++                call neko_error(error_msg)
+              else
+                 marked_zones(zone_indices(j)) = .true.
+              end if
+@@ -1133,9 +1133,9 @@ contains
+        do i = 1, size(this%msh%labeled_zones)
+           if ((this%msh%labeled_zones(i)%size .gt. 0) .and. &
+                (.not. marked_zones(i))) then
+-             write(error_unit, '(A, A, I0)') "*** ERROR ***: ", &
++             write(error_msg, '(A, I0)') &
+                   "No fluid boundary condition assigned to zone ", i
+-             error stop
++             call neko_error(error_msg)
+           end if
+        end do
+ 
+diff --git a/src/io/output_controller.f90 b/src/io/output_controller.f90
+index 462ae4e6d22..bd18b4186c1 100644
+--- a/src/io/output_controller.f90
++++ b/src/io/output_controller.f90
+@@ -282,6 +282,7 @@ contains
+              write(log_buf, '(A,I6)') 'Output number :', &
+                   int(this%controllers(i)%nexecutions)
+              call neko_log%message(log_buf)
++             call neko_log%flush()
+ 
+              call samp%output_list(i)%ptr%sample(time%t)
+ 
+@@ -301,6 +302,7 @@ contains
+             ' Output time (s): ', sample_time
+        call neko_log%message(log_buf)
+        call neko_log%end_section()
++       call neko_log%flush()
+     end if
+     call profiler_end_region('Output controller', 22)
+   end subroutine output_controller_execute
+diff --git a/src/neko.f90 b/src/neko.f90
+index 50fc8665f12..3e7f3f31218 100644
+--- a/src/neko.f90
++++ b/src/neko.f90
+@@ -255,6 +255,7 @@ contains
+ 
+     call C%time%reset()
+     call simulation_init(C, dt_controller)
++    call neko_log%flush()
+ 
+     call profiler_start
+     tstep_loop_start_time = MPI_WTIME()
+@@ -264,6 +265,7 @@ contains
+     end do
+     call profiler_stop
+ 
++    call neko_log%flush()
+     call simulation_finalize(C)
+ 
+   end subroutine neko_solve
+diff --git a/src/scalar/scalar_pnpn.f90 b/src/scalar/scalar_pnpn.f90
+index be69bd27f4c..afa868e4ac9 100644
+--- a/src/scalar/scalar_pnpn.f90
++++ b/src/scalar/scalar_pnpn.f90
+@@ -34,7 +34,6 @@
+ 
+ module scalar_pnpn
+   use num_types, only : rp
+-  use, intrinsic :: iso_fortran_env, only : error_unit
+   use rhs_maker, only : rhs_maker_bdf_t, rhs_maker_ext_t, rhs_maker_oifs_t, &
+        rhs_maker_ext_fctry, rhs_maker_bdf_fctry, rhs_maker_oifs_fctry
+   use scalar_scheme, only : scalar_scheme_t
+@@ -65,6 +64,7 @@ module scalar_pnpn
+   use zero_dirichlet, only : zero_dirichlet_t
+   use time_step_controller, only : time_step_controller_t
+   use time_state, only : time_state_t
++  use utils, only : neko_error
+   use bc, only : bc_t
+   use comm, only : NEKO_COMM
+   use mpi_f08, only : MPI_Allreduce, MPI_INTEGER, MPI_MAX
+@@ -479,6 +479,7 @@ contains
+     ! Monitor which boundary zones have been marked
+     logical, allocatable :: marked_zones(:)
+     integer, allocatable :: zone_indices(:)
++    character(len=256) :: error_msg
+ 
+     if (this%params%valid_path('boundary_conditions')) then
+        call this%params%info('boundary_conditions', &
+@@ -506,21 +507,23 @@ contains
+                   MPI_INTEGER, MPI_MAX, NEKO_COMM, ierr)
+ 
+              if (global_zone_size .eq. 0) then
+-                write(error_unit, '(A, A, I0, A, A, I0, A)') &
+-                     "*** ERROR ***: ", "Zone index ", zone_indices(j), &
++                write(error_msg, '(A, I0, A, A, I0, A)') &
++                     "Zone index ", zone_indices(j), &
+                      " is invalid as this zone has 0 size, meaning it ", &
+                      "does not exist in the mesh. Check scalar boundary ", &
+                      "condition ", i, "."
++                call neko_error(error_msg)
+                 error stop
+              end if
+ 
+              if (marked_zones(zone_indices(j))) then
+-                write(error_unit, '(A, A, I0, A, A, A, A)') "*** ERROR ***: ", &
++                write(error_msg, '(A, I0, A, A, A, A)')&
+                      "Zone with index ", zone_indices(j), &
+                      " has already been assigned a boundary condition. ", &
+                      "Please check your boundary_conditions entry for the ", &
+                      "scalar and make sure that each zone index appears only ",&
+                      "in a single boundary condition."
++                call neko_error(error_msg)
+                 error stop
+              else
+                 marked_zones(zone_indices(j)) = .true.
+@@ -537,8 +540,9 @@ contains
+        do i = 1, size(this%msh%labeled_zones)
+           if ((this%msh%labeled_zones(i)%size .gt. 0) .and. &
+                (.not. marked_zones(i))) then
+-             write(error_unit, '(A, A, I0)') "*** ERROR ***: ", &
++             write(error_msg, '(A, I0)') &
+                   "No scalar boundary condition assigned to zone ", i
++             call neko_error(error_msg)
+              error stop
+           end if
+        end do
+@@ -546,9 +550,10 @@ contains
+        ! Check that there are no labeled zones, i.e. all are periodic.
+        do i = 1, size(this%msh%labeled_zones)
+           if (this%msh%labeled_zones(i)%size .gt. 0) then
+-             write(error_unit, '(A, A, A)') "*** ERROR ***: ", &
++             write(error_msg, '(A, A)') &
+                   "No boundary_conditions entry in the case file for scalar ", &
+                   this%s%name
++             call neko_error(error_msg)
+              error stop
+           end if
+        end do
+diff --git a/src/simulation.f90 b/src/simulation.f90
+index 93b5ec1af57..6c6082b98e5 100644
+--- a/src/simulation.f90
++++ b/src/simulation.f90
+@@ -316,10 +316,12 @@ contains
+     else
+        format_str = '.chkp'
+     end if
+-    call chkpf%init(C%output_directory // 'joblimit'//trim(format_str))
+-    call chkpf%write(C%chkp, t)
++    call chkpf%init(C%output_directory // 'joblimit' // trim(format_str))
+     write(log_buf, '(A)') '! saving checkpoint >>>'
+     call neko_log%message(log_buf)
++    call neko_log%flush()
++    call chkpf%write(C%chkp, t)
++    call neko_log%flush()
+ 
+   end subroutine simulation_joblimit_chkp
+ 
+-- 
+2.43.0
+

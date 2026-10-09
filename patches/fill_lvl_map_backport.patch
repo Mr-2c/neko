@@ -1,0 +1,61 @@
+--- a/src/multigrid/tree_amg_multigrid.f90
++++ b/src/multigrid/tree_amg_multigrid.f90
+@@ -524,31 +524,47 @@
+   !! @param amg The tamg hierarchy
+   subroutine fill_lvl_map(amg)
+     type(tamg_hierarchy_t), intent(inout) :: amg
+-    integer :: i, j, k, l, nid, n
++    integer, allocatable :: dof2gid(:)
++    integer :: i, j, k, l, nid, n, nmap
+     do j = 1, amg%lvl(1)%nnodes
+        do k = 1, amg%lvl(1)%nodes(j)%ndofs
+           nid = amg%lvl(1)%nodes(j)%dofs(k)
+           amg%lvl(1)%map_finest2lvl(nid) = amg%lvl(1)%nodes(j)%gid
+        end do
+     end do
+-    n = size(amg%lvl(1)%map_finest2lvl)
++    ! map_finest2lvl is allocated 0:fine_lvl_dofs (element 0 carries the
++    ! length for the device kernels), so size() is one more than the number
++    ! of dofs and must not be used as the upper loop bound.
++    n = amg%lvl(1)%fine_lvl_dofs
+     do l = 2, amg%nlvls
++       ! Invert the level's node->dof lists once into dof2gid, then compose
++       ! with the level below. Searching every node for every dof instead
++       ! is O(n * dofs-on-level) and dominates setup on large coarse grids.
++       allocate(dof2gid(amg%lvl(l)%fine_lvl_dofs))
++       dof2gid = 0
++       do j = 1, amg%lvl(l)%nnodes
++          do k = 1, amg%lvl(l)%nodes(j)%ndofs
++             dof2gid(amg%lvl(l)%nodes(j)%dofs(k)) = amg%lvl(l)%nodes(j)%gid
++          end do
++       end do
+        do i = 1, n
+           nid = amg%lvl(l-1)%map_finest2lvl(i)
+-          do j = 1, amg%lvl(l)%nnodes
+-             do k = 1, amg%lvl(l)%nodes(j)%ndofs
+-                if (nid .eq. amg%lvl(l)%nodes(j)%dofs(k)) then
+-                   amg%lvl(l)%map_finest2lvl(i) = amg%lvl(l)%nodes(j)%gid
+-                end if
+-             end do
+-          end do
++          if (nid .ge. 1 .and. nid .le. amg%lvl(l)%fine_lvl_dofs) then
++             if (dof2gid(nid) .gt. 0) then
++                amg%lvl(l)%map_finest2lvl(i) = dof2gid(nid)
++             end if
++          end if
+        end do
++       deallocate(dof2gid)
+     end do
+     if (NEKO_BCKND_DEVICE .eq. 1) then
++       ! The whole array, element 0 included, is what gets mirrored; keep
++       ! this independent of the loop bound above.
++       nmap = size(amg%lvl(1)%map_finest2lvl)
+        do l = 1, amg%nlvls
+-          amg%lvl(l)%map_finest2lvl(0) = n
++          amg%lvl(l)%map_finest2lvl(0) = nmap
+           call device_memcpy( amg%lvl(l)%map_finest2lvl, &
+-               amg%lvl(l)%map_finest2lvl_d, n, &
++               amg%lvl(l)%map_finest2lvl_d, nmap, &
+                HOST_TO_DEVICE, .true.)
+           call device_memcpy( amg%lvl(l)%map_f2c, &
+                amg%lvl(l)%map_f2c_d, amg%lvl(l)%fine_lvl_dofs+1, &
