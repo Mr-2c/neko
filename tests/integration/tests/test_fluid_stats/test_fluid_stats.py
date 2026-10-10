@@ -146,7 +146,8 @@ def test_fluid_stats(launcher_script, request, log_file, tmp_path):
     # unchanged.
     #
 
-    csv = np.genfromtxt(join("tests", "test_fluid_stats", "stats_gauge0.csv"),
+    # The output_filename is used as given, without a run counter
+    csv = np.genfromtxt(join("tests", "test_fluid_stats", "stats_gauge.csv"),
                         delimiter=",")[12, 2:]
 
     gauge_tol = {"dp": 1e-8, "sp": 1e-5}[conftest.RP]

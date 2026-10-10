@@ -23,9 +23,9 @@ contains
     p => neko_registry%get_field("p")
     n = u%size()
     do i = 1, n
-       x = u%dof%x%x(i,1,1,1)
-       y = u%dof%y%x(i,1,1,1)
-       z = u%dof%z%x(i,1,1,1)
+       x = u%dof%x(i,1,1,1)
+       y = u%dof%y(i,1,1,1)
+       z = u%dof%z(i,1,1,1)
        u%x(i,1,1,1) = x + 2.0_rp * y + 3.0_rp * z
        v%x(i,1,1,1) = x * y * z
        w%x(i,1,1,1) = x * x * y + z * z * x + 1.0_rp

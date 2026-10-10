@@ -70,8 +70,8 @@
         "avg_direction": "x",
         "compute_control": "tsteps",
         "compute_value": 1,
-        "output_control": "tsteps",
-        "output_value": 2
+        "output_control": "simulationtime",
+        "output_value": 2.0
       },
       {
         "type": "fluid_stats",
@@ -81,8 +81,8 @@
         "avg_direction": "y",
         "compute_control": "tsteps",
         "compute_value": 1,
-        "output_control": "tsteps",
-        "output_value": 2
+        "output_control": "simulationtime",
+        "output_value": 2.0
       },
       {
         "type": "fluid_stats",
@@ -92,8 +92,8 @@
         "avg_direction": "z",
         "compute_control": "tsteps",
         "compute_value": 1,
-        "output_control": "tsteps",
-        "output_value": 2
+        "output_control": "simulationtime",
+        "output_value": 2.0
       },
       {
         "type": "fluid_stats",
@@ -103,8 +103,8 @@
         "avg_direction": "xz",
         "compute_control": "tsteps",
         "compute_value": 1,
-        "output_control": "tsteps",
-        "output_value": 2
+        "output_control": "simulationtime",
+        "output_value": 2.0
       },
       {
         "type": "fluid_stats",
@@ -114,8 +114,8 @@
         "avg_direction": "yz",
         "compute_control": "tsteps",
         "compute_value": 1,
-        "output_control": "tsteps",
-        "output_value": 2
+        "output_control": "simulationtime",
+        "output_value": 2.0
       },
       {
         "type": "fluid_stats",
@@ -126,8 +126,8 @@
         "keep_3d_fields": true,
         "compute_control": "tsteps",
         "compute_value": 1,
-        "output_control": "tsteps",
-        "output_value": 2
+        "output_control": "simulationtime",
+        "output_value": 2.0
       },
       {
         "type": "fluid_stats",
@@ -138,8 +138,8 @@
         "keep_3d_fields": true,
         "compute_control": "tsteps",
         "compute_value": 1,
-        "output_control": "tsteps",
-        "output_value": 2
+        "output_control": "simulationtime",
+        "output_value": 2.0
       }
     ]
   }

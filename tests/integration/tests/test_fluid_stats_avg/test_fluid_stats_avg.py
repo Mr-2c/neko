@@ -13,6 +13,10 @@ averaged in z (2D output), and the full set averaged in xz and the basic
 set in yz (1D output). Two more components keep the statistics as 3D
 fields (`keep_3d_fields`) and average them when writing, which must give
 the same results.
+
+The statistics are written with a `simulationtime` control at the end of
+the run; they are also written, empty, at its start, and only the last
+write is checked.
 """
 import glob
 import subprocess
@@ -151,10 +155,14 @@ def check_2d(name, d, n_stats):
 
 
 def check_1d(name, dirs, n_stats):
-    files = sorted(glob.glob(join(TEST_DIR, f"{name}[0-9].csv")))
+    # The output_filename is used as given, without a run counter
+    files = sorted(glob.glob(join(TEST_DIR, f"{name}.csv")))
     assert len(files) == 1, files
     data = np.genfromtxt(files[0], delimiter=",")
     assert data.shape[1] == 2 + n_stats, data.shape
+    # Only the last write: the statistics are also written, empty, at the
+    # start of the run
+    data = data[data[:, 0] == data[:, 0].max()]
     coord = data[:, 1]
     ref = expected_1d(dirs, coord, n_stats)
     for i in range(n_stats):
