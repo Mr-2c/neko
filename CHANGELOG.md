@@ -30,6 +30,14 @@
 - Added a start-up check of each linear solver's operator and preconditioner
   that warns on incompatible pairings, and `residual_check_interval` to
   compare the true with the reported residual.
+- Added `case.time.exact_output_time`, which fits the variable time step so
+  that the sampling and output times of every time based schedule, and
+  `end_time`, are reached exactly. The step stays within the bounds of the
+  CFL controller and is refitted only at the scheduled times and when the
+  controller changes it. With a fixed step the option only checks the
+  schedules. Experimental.
+- An MPMD run whose coupled cases do not agree on `variable_timestep` stops
+  with an error at setup instead of hanging at the first time step.
 
 ## 1.1.1 [2026-09-08]
 - Fixed the fused three-component Helmholtz operator on the CPU backend

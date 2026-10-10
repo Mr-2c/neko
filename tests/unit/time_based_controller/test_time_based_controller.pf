@@ -170,4 +170,83 @@ subroutine test_register()
 
 end subroutine test_register
 
+!> Test the time until the next scheduled execution
+@test
+subroutine test_time_to_next()
+  use pfunit
+  use time_based_controller, only : time_based_controller_t
+  use time_state, only : time_state_t
+  use num_types, only : rp
+  implicit none
+
+  type(time_based_controller_t) :: ctrl
+  type(time_state_t) :: time
+
+  call time%init(0.0_rp, 1.0_rp, 0.01_rp)
+
+  ! Nothing to land on for tsteps and never
+  call ctrl%init(0.0_rp, 1.0_rp, "tsteps", 10.0_rp)
+  @assertTrue(ctrl%time_to_next(time, 0.01_rp) .ge. huge(0.0_rp))
+  call ctrl%free()
+  call ctrl%init(0.0_rp, 1.0_rp, "never", 0.0_rp)
+  @assertTrue(ctrl%time_to_next(time, 0.01_rp) .ge. huge(0.0_rp))
+
+  ! Executed at 0, 0.1 and 0.2: the next is at 0.3
+  call ctrl%free()
+  call ctrl%init(0.0_rp, 1.0_rp, "simulationtime", 0.1_rp)
+  ctrl%nexecutions = 3
+  time%t = 0.25_rp
+  @assertEqual(ctrl%time_to_next(time, 0.01_rp), 0.05_rp, tolerance=1e-12_rp)
+
+  ! Due now at the start, so executed at the coming step anyway: the one
+  ! after it is landed on
+  ctrl%nexecutions = 0
+  time%t = 0.0_rp
+  @assertEqual(ctrl%time_to_next(time, 0.01_rp), 0.1_rp, tolerance=1e-12_rp)
+
+  ! An interval shorter than the step, or than the shortest interval to
+  ! land on, is not landed on
+  @assertTrue(ctrl%time_to_next(time, 0.2_rp) .ge. huge(0.0_rp))
+  @assertTrue(ctrl%time_to_next(time, 0.01_rp, 0.15_rp) .ge. huge(0.0_rp))
+
+  ! A scheduled time at the end is landed on, one after it never executes
+  ctrl%nexecutions = 10
+  time%t = 0.95_rp
+  @assertEqual(ctrl%time_to_next(time, 0.01_rp), 0.05_rp, tolerance=1e-12_rp)
+  ctrl%nexecutions = 11
+  @assertTrue(ctrl%time_to_next(time, 0.01_rp) .ge. huge(0.0_rp))
+
+  ! The schedule is anchored at the start time of the case
+  call time%init(0.5_rp, 2.0_rp, 0.01_rp)
+  call ctrl%free()
+  call ctrl%init(0.5_rp, 2.0_rp, "nsamples", 6.0_rp)
+  ctrl%nexecutions = 2
+  time%t = 0.7_rp
+  @assertEqual(ctrl%time_to_next(time, 0.01_rp), 0.3_rp, tolerance=1e-12_rp)
+
+end subroutine test_time_to_next
+
+!> Test the counter set on a restart, which uses the step taken last
+@test
+subroutine test_set_counter()
+  use pfunit
+  use time_based_controller, only : time_based_controller_t
+  use time_state, only : time_state_t
+  use num_types, only : rp
+  implicit none
+
+  type(time_based_controller_t) :: ctrl
+  type(time_state_t) :: time
+
+  ! The placeholder step of a variable time step is a whole time unit
+  call time%init(0.0_rp, 1.0_rp, 1.0_rp)
+  time%t = 0.0546_rp
+  time%dtlag(1) = 1.0e-3_rp
+  call ctrl%init(0.0_rp, 1.0_rp, "simulationtime", 0.0107_rp)
+  call ctrl%set_counter(time)
+  ! Executed at 0, 0.0107, ..., 0.0535
+  @assertEqual(ctrl%nexecutions, 6)
+
+end subroutine test_set_counter
+
 end module test_time_based_controller

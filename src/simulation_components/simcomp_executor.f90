@@ -71,6 +71,8 @@ module simcomp_executor
      procedure, pass(this) :: compute => simcomp_executor_compute
      !> Execute restart for all simcomps.
      procedure, pass(this) :: restart=> simcomp_executor_restart
+     !> The time until the next scheduled execution of any simcomp.
+     procedure, pass(this) :: time_to_next => simcomp_executor_time_to_next
      !> Finalize the initialization.
      procedure, private, pass(this) :: finalize => simcomp_executor_finalize
      !> Get the number of simcomps.
@@ -300,6 +302,33 @@ contains
     end if
 
   end subroutine simcomp_executor_preprocess
+
+  !> The time until the next scheduled execution of `preprocess`, `compute`
+  !! or the output of any simcomp, or `huge(0.0_rp)` if there is none. Used
+  !! to make the time step land exactly on it.
+  !! @param time The current time.
+  !! @param dt The time step about to be taken, before it is shortened to
+  !! land on a scheduled time.
+  function simcomp_executor_time_to_next(this, time, dt, min_interval) &
+       result(t)
+    class(simcomp_executor_t), intent(in) :: this
+    type(time_state_t), intent(in) :: time
+    real(kind=rp), intent(in) :: dt
+    real(kind=rp), intent(in), optional :: min_interval
+    real(kind=rp) :: t
+    integer :: i
+
+    t = huge(0.0_rp)
+    if (allocated(this%simcomps)) then
+       do i = 1, size(this%simcomps)
+          if (allocated(this%simcomps(i)%simcomp)) then
+             t = min(t, this%simcomps(i)%simcomp%time_to_next(time, dt, &
+                  min_interval))
+          end if
+       end do
+    end if
+
+  end function simcomp_executor_time_to_next
 
   !> Execute compute_ for all simcomps.
   !! @param time The current time

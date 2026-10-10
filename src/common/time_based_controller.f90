@@ -79,6 +79,10 @@ module time_based_controller
      !> Set the counter based on a time (for restarts)
      procedure, pass(this) :: set_counter => &
           time_based_controller_set_counter
+     !> The time until the next scheduled execution the time step should
+     !! land on.
+     procedure, pass(this) :: time_to_next => &
+          time_based_controller_time_to_next
 
   end type time_based_controller_t
 
@@ -221,13 +225,79 @@ contains
   subroutine time_based_controller_set_counter(this, time)
     class(time_based_controller_t), intent(inout) :: this
     type(time_state_t) :: time
+    real(kind=rp) :: dt
 
     if (this%nsteps .eq. 0) then
-       this%nexecutions = int(((time%t - time%start_time) + 0.1_rp*time%dt) &
+       ! The tolerance of `check` is a tenth of the step. On a restart the
+       ! step taken last comes from the checkpoint, while `time%dt` is only
+       ! a placeholder of one time unit with a variable time step.
+       dt = time%dt
+       if (abs(time%dtlag(1)) .gt. 0.0_rp) dt = time%dtlag(1)
+       this%nexecutions = int(((time%t - time%start_time) + 0.1_rp*dt) &
             / this%time_interval) + 1
     end if
 
   end subroutine time_based_controller_set_counter
+
+
+  !> The time until the next scheduled execution that the time step should
+  !! land on, or `huge(0.0_rp)` if there is none.
+  !! @param time The current time state.
+  !! @param dt The time step the simulation is about to take, before it is
+  !! shortened to land on a scheduled time.
+  !! @param min_interval The shortest interval that is landed on, optional.
+  !! @details Used by the time step controller to shorten the time step, so
+  !! that the scheduled times are reached exactly rather than at the first
+  !! step past them. The scheduled times are those of `check`: the
+  !! execution counted by `nexecutions` is due at `time%start_time +
+  !! nexecutions * time_interval`. There is nothing to land on for
+  !! - the `tsteps` and `never` controls, which have no time based schedule;
+  !! - an interval shorter than the time step (or `min_interval`), which
+  !!   executes at every step already and must not shorten the step to the
+  !!   interval;
+  !! - a scheduled time after `end_time`, which never executes.
+  !!
+  !! An execution that is due at the current time already, which happens for
+  !! the components that do not execute before the time loop, is performed
+  !! at the coming step wherever it lands, so the time to land on is the
+  !! scheduled time after it, which would otherwise be passed by.
+  pure function time_based_controller_time_to_next(this, time, dt, &
+       min_interval) result(t_to_next)
+    class(time_based_controller_t), intent(in) :: this
+    type(time_state_t), intent(in) :: time
+    real(kind=rp), intent(in) :: dt
+    real(kind=rp), intent(in), optional :: min_interval
+    real(kind=rp) :: t_to_next
+    real(kind=rp) :: progress, t_due, t_next, shortest, tol
+
+    t_to_next = huge(0.0_rp)
+
+    if (this%never .or. this%nsteps .gt. 0) return
+    shortest = abs(dt)
+    if (present(min_interval)) shortest = max(min_interval, shortest)
+    if (.not. this%time_interval .ge. shortest) return
+
+    ! Time since the anchor of the schedule, as in `check`
+    progress = time%t - time%start_time
+    t_due = real(this%nexecutions, rp) * this%time_interval
+    tol = 1.0e-9_rp * max(abs(t_due), this%time_interval)
+
+    ! An execution not ahead of the current time is performed at the coming
+    ! step anyway, so land on the one after it.
+    if (t_due .le. progress + tol) then
+       t_next = t_due + this%time_interval
+    else
+       t_next = t_due
+    end if
+
+    ! A scheduled time after the end is never executed, see `check`
+    if (time%start_time + t_next .gt. this%end_time + tol) return
+
+    if (t_next .le. progress) return
+
+    t_to_next = t_next - progress
+
+  end function time_based_controller_time_to_next
 
 
 end module time_based_controller
