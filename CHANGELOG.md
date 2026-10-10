@@ -2,6 +2,13 @@
 
 ## 1.1.99 [develop]
 
+### Hunter backports
+- Reduced the memory footprint of dealiased advection: the fine-space
+  metrics and work arrays are no longer stored per advection object; on
+  GPUs the elements are processed in chunks with shared scratch arrays.
+  The metrics are now exact on curved elements. New `numerics` options
+  `dealias_chunk_elements`, `dealias_store_metrics` and `dealias_metrics`.
+
 ## 1.1.1 [2026-09-08]
 - Fixed the fused three-component Helmholtz operator on the CPU backend
   (`ax_helm_cpu_t%compute_vector`) at polynomial orders 3 and 8, where a
