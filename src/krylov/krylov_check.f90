@@ -64,7 +64,7 @@ module krylov_check
   use scratch_registry, only : neko_scratch_registry
   use field_math, only : field_copy, field_add2, field_sub2
   use math, only : glsc3, col2, glmin, glmax, NEKO_EPS
-  use operators, only : ortho
+  use operators, only : ortho, rotate_cyc
   use device, only : device_memcpy, HOST_TO_DEVICE
   use device_math, only : device_glsc3, device_col2
   use opr_device, only : device_ortho
@@ -443,8 +443,11 @@ contains
   !! @param names Names of the three components, for the log.
   !! @param results The three solver monitors.
   !! @param tol The solver's absolute tolerance.
+  !! @param coupled Whether the solver is a coupled one, which reports the
+  !! norm of the three components together in each monitor (optional,
+  !! default false).
   subroutine krylov_check_residual_vector(names, Ax, x, y, z, fx, fy, fz, &
-       coef, gs, bclstx, bclsty, bclstz, results, tol)
+       coef, gs, bclstx, bclsty, bclstz, results, tol, coupled)
     character(len=*), intent(in) :: names(3)
     class(ax_t), intent(inout) :: Ax
     type(field_t), intent(inout) :: x, y, z, fx, fy, fz
@@ -453,10 +456,12 @@ contains
     type(bc_list_t), intent(inout) :: bclstx, bclsty, bclstz
     type(ksp_monitor_t), intent(in) :: results(3)
     real(kind=rp), intent(in) :: tol
+    logical, intent(in), optional :: coupled
     type(field_ptr_t) :: w(3)
     type(field_t), pointer :: rx, ry, rz
     integer :: w_idx(3), n
-    logical :: w_scratch
+    logical :: w_scratch, coupled_
+    real(kind=rp) :: res_x, res_y, res_z
 
     n = coef%dof%size()
     call work_fields_get(w, w_idx, coef, w_scratch)
@@ -466,18 +471,32 @@ contains
     call Ax%compute(rx%x, x%x, coef, coef%msh, coef%Xh)
     call Ax%compute(ry%x, y%x, coef, coef%msh, coef%Xh)
     call Ax%compute(rz%x, z%x, coef, coef%msh, coef%Xh)
+    coupled_ = .false.
+    if (present(coupled)) coupled_ = coupled
+    ! Assembled as the solver does: the coupled solvers rotate the three
+    ! components on cyclic boundaries around the gather-scatter
+    if (coupled_) call rotate_cyc(rx, ry, rz, 1, coef)
     call gs%op(rx, GS_OP_ADD)
     call gs%op(ry, GS_OP_ADD)
     call gs%op(rz, GS_OP_ADD)
+    if (coupled_) call rotate_cyc(rx, ry, rz, 0, coef)
     call bclstx%apply_scalar(rx%x, n)
     call bclsty%apply_scalar(ry%x, n)
     call bclstz%apply_scalar(rz%x, n)
     call field_sub2(rx, fx, n)
     call field_sub2(ry, fy, n)
     call field_sub2(rz, fz, n)
-    call report_residual(names(1), residual_norm(rx, coef), results(1), tol)
-    call report_residual(names(2), residual_norm(ry, coef), results(2), tol)
-    call report_residual(names(3), residual_norm(rz, coef), results(3), tol)
+    res_x = residual_norm(rx, coef)
+    res_y = residual_norm(ry, coef)
+    res_z = residual_norm(rz, coef)
+    if (coupled_) then
+       call report_residual('Velocity', sqrt(res_x**2 + res_y**2 + res_z**2), &
+            results(1), tol)
+    else
+       call report_residual(names(1), res_x, results(1), tol)
+       call report_residual(names(2), res_y, results(2), tol)
+       call report_residual(names(3), res_z, results(3), tol)
+    end if
     call work_fields_put(w, w_idx, w_scratch)
   end subroutine krylov_check_residual_vector
 

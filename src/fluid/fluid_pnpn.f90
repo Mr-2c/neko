@@ -127,6 +127,12 @@ module fluid_pnpn
      !! and velocity solves (0: only at the first step)
      integer :: prs_residual_check_interval = 0
      integer :: vel_residual_check_interval = 0
+     !> Whether the start-up checks of the pressure and velocity solvers are
+     !! still to be made, at the first solve
+     logical :: prs_solver_check_pending = .false.
+     logical :: vel_solver_check_pending = .false.
+     !> Preconditioner type names, for the log of the solver checks
+     character(len=:), allocatable :: prs_pc_type, vel_pc_type
      type(projection_vel_t) :: proj_vel
 
      !
@@ -414,7 +420,7 @@ contains
          abs_tol)
     call json_get_or_default(params, 'case.fluid.pressure_solver.monitor', &
          monitor, .false.)
-    call json_get_or_default(params, &
+    call json_get_or_lookup_or_default(params, &
          'case.fluid.pressure_solver.gmres_space_size', &
          gmres_space_size, KSP_GMRES_SPACE_SIZE)
     call neko_log%message('Type       : ('// trim(solver_type) // &
@@ -433,24 +439,26 @@ contains
          precon_type, precon_params)
     call neko_log%end_section()
 
-    call json_get_or_default(params, &
+    call json_get_or_lookup_or_default(params, &
          'case.fluid.pressure_solver.residual_check_interval', &
          this%prs_residual_check_interval, 0)
-    call json_get_or_default(params, &
+    call json_get_or_lookup_or_default(params, &
          'case.fluid.velocity_solver.residual_check_interval', &
          this%vel_residual_check_interval, 0)
 
     ! Check that the operators and preconditioners have the properties the
-    ! chosen Krylov methods require
-    call krylov_check_setup('Pressure', this%ksp_prs, this%Ax_prs, this%c_Xh, &
-         this%gs_Xh, this%bclst_dp, .not. this%prs_dirichlet, &
-         pc_type = precon_type)
+    ! chosen Krylov methods require. The checks are made at the first solve,
+    ! after the preconditioners are updated: only then do the coefficients
+    ! of the operators hold the values of the actual systems, and some
+    ! preconditioners (Chebyshev smoothers, as in phmg) fix their eigenvalue
+    ! estimate at their first application.
+    this%prs_pc_type = precon_type
+    this%prs_solver_check_pending = .true.
     if (.not. this%full_stress_formulation) then
        call json_get(params, 'case.fluid.velocity_solver.preconditioner.type', &
             precon_type)
-       call krylov_check_setup('Velocity', this%ksp_vel, this%Ax_vel, &
-            this%c_Xh, this%gs_Xh, this%bclst_du, .false., &
-            pc_type = precon_type)
+       this%vel_pc_type = precon_type
+       this%vel_solver_check_pending = .true.
     end if
 
     ! Initialize the advection factory
@@ -622,6 +630,10 @@ contains
     call this%bclst_dp%free()
     call this%proj_prs%free()
     call this%proj_vel%free()
+    if (allocated(this%prs_pc_type)) deallocate(this%prs_pc_type)
+    if (allocated(this%vel_pc_type)) deallocate(this%vel_pc_type)
+    this%prs_solver_check_pending = .false.
+    this%vel_solver_check_pending = .false.
 
     call this%p_res%free()
     call this%u_res%free()
@@ -874,6 +886,13 @@ contains
 
          call this%pc_prs%update()
 
+         if (this%prs_solver_check_pending) then
+            call krylov_check_setup('Pressure', this%ksp_prs, Ax_prs, c_Xh, &
+                 gs_Xh, this%bclst_dp, .not. this%prs_dirichlet, &
+                 pc_type = this%prs_pc_type)
+            this%prs_solver_check_pending = .false.
+         end if
+
          call profiler_start_region('Pressure_solve', 3)
 
          ! Solve for the pressure increment.
@@ -933,6 +952,12 @@ contains
 
          call this%pc_vel%update()
 
+         if (this%vel_solver_check_pending) then
+            call krylov_check_setup('Velocity', this%ksp_vel, Ax_vel, c_Xh, &
+                 gs_Xh, this%bclst_du, .false., pc_type = this%vel_pc_type)
+            this%vel_solver_check_pending = .false.
+         end if
+
          call profiler_start_region("Velocity_solve", 4)
          ksp_results(2:4) = this%ksp_vel%solve_coupled(Ax_vel, du, dv, dw, &
               u_res%x, v_res%x, w_res%x, n, c_Xh, &
@@ -950,8 +975,8 @@ contains
                call krylov_check_residual(ksp_results(2:4)%name, Ax_vel, &
                     du, dv, dw, u_res, v_res, w_res, c_Xh, gs_Xh, &
                     this%bclst_du, this%bclst_dv, this%bclst_dw, &
-                    ksp_results(2:4), &
-                    this%ksp_vel%abs_tol)
+                    ksp_results(2:4), this%ksp_vel%abs_tol, &
+                    coupled = index(this%ksp_vel%type_name, 'coupled') .gt. 0)
             end if
          end if
 

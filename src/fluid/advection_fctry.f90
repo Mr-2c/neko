@@ -139,6 +139,8 @@ contains
        end if
     end select
 
+    if (allocated(metrics)) deallocate(metrics)
+
   end subroutine advection_factory
 
 

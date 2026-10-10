@@ -225,15 +225,9 @@ contains
   subroutine time_based_controller_set_counter(this, time)
     class(time_based_controller_t), intent(inout) :: this
     type(time_state_t) :: time
-    real(kind=rp) :: dt
 
     if (this%nsteps .eq. 0) then
-       ! The tolerance of `check` is a tenth of the step. On a restart the
-       ! step taken last comes from the checkpoint, while `time%dt` is only
-       ! a placeholder of one time unit with a variable time step.
-       dt = time%dt
-       if (abs(time%dtlag(1)) .gt. 0.0_rp) dt = time%dtlag(1)
-       this%nexecutions = int(((time%t - time%start_time) + 0.1_rp*dt) &
+       this%nexecutions = int(((time%t - time%start_time) + 0.1_rp*time%dt) &
             / this%time_interval) + 1
     end if
 

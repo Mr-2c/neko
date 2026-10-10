@@ -70,7 +70,8 @@ module adv_dealias
   use coefs, only : coef_t
   use vector, only : vector_t
   use device_math, only : device_sub2, device_add2, device_col3
-  use neko_config, only : NEKO_BCKND_DEVICE
+  use neko_config, only : NEKO_BCKND_DEVICE, NEKO_BCKND_OPENCL, &
+       NEKO_BCKND_METAL
   use utils, only : neko_error
   use logger, only : neko_log, LOG_SIZE
   use profiler, only : profiler_start_region, profiler_end_region
@@ -212,9 +213,26 @@ contains
 
     this%chunk_request = 0
     if (present(chunk)) this%chunk_request = max(chunk, -1)
+
+    ! OpenCL and Metal device pointers are opaque handles, which cannot be
+    ! offset to a chunk or to one of the stored metrics
+    if (NEKO_BCKND_OPENCL .eq. 1 .or. NEKO_BCKND_METAL .eq. 1) then
+       this%chunk_request = -1
+       this%store_metrics = .false.
+    end if
+
     this%chunk = dealias_chunk_size(this, nelv)
+    ! The work arrays of a chunk are indexed with default integers
+    this%chunk = max(min(this%chunk, huge(1) / this%Xh_GL%lxyz), 1)
 
     if (this%store_metrics) then
+       if (NEKO_BCKND_DEVICE .eq. 1 .and. &
+            int(this%Xh_GL%lxyz, i8) * int(max(nelv, 1), i8) * 9_i8 .gt. &
+            int(huge(1), i8)) then
+          call neko_error('Dealiasing: too many elements on a rank to ' // &
+               'store the metrics on the device, set ' // &
+               'dealias_store_metrics to false')
+       end if
        allocate(this%gl_cof(this%Xh_GL%lxyz, max(nelv, 1), 9))
        if (NEKO_BCKND_DEVICE .eq. 1) then
           call device_map(this%gl_cof, this%gl_cof_d, &

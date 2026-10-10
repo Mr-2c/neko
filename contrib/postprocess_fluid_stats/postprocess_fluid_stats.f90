@@ -10,7 +10,7 @@ program postprocess_fluid_stats
   type(fld_file_data_t) :: stats_data
   type(fluid_stats_t) :: fld_stats
   type(coef_t) :: coef
-  type(dofmap_t) :: dof
+  type(dofmap_t), target :: dof
   type(space_t) :: Xh
   type(mesh_t) :: msh
   type(gs_t) :: gs_h
@@ -98,6 +98,8 @@ program postprocess_fluid_stats
   call Xh%init(GLL, stats_data%lx, stats_data%ly, stats_data%lz)
 
   call dof%init(msh, Xh)
+  ! The statistics borrow their work fields from the scratch registry
+  call neko_scratch_registry%set_dofmap(dof)
   call gs_h%init(dof)
   call coef%init(gs_h)
 

@@ -98,6 +98,11 @@ module scalar_pnpn
      !! Also needed since a bc_list is the type that is sent to, e.g. solvers,
      !! cannot just send `bc_res` on its own.
      type(bc_list_t) :: bclst_ds
+     !> Whether the start-up check of the solver is still to be made, at the
+     !! first solve
+     logical :: solver_check_pending = .false.
+     !> Preconditioner type name, for the log of the solver check
+     character(len=:), allocatable :: pc_type
 
      !> Advection operator.
      class(advection_t), allocatable :: adv
@@ -260,10 +265,11 @@ contains
          this%slag)
 
     ! Check that the operator and preconditioner have the properties the
-    ! chosen Krylov method requires
+    ! chosen Krylov method requires, at the first solve, when the
+    ! coefficients of the operator are those of the actual system
     call json_get(params, 'solver.preconditioner.type', precon_type)
-    call krylov_check_setup(trim(this%name), this%ksp, this%ax, this%c_Xh, &
-         this%gs_Xh, this%bclst_ds, .false., pc_type = precon_type)
+    this%pc_type = precon_type
+    this%solver_check_pending = .true.
   end subroutine scalar_pnpn_init
 
   ! Restarts the scalar from a checkpoint
@@ -312,6 +318,8 @@ contains
 
     call this%bc_res%free()
     call this%bclst_ds%free()
+    if (allocated(this%pc_type)) deallocate(this%pc_type)
+    this%solver_check_pending = .false.
     call this%proj_s%free()
 
     call this%s_res%free()
@@ -436,6 +444,13 @@ contains
       call this%proj_s%pre_solving(s_res%x, tstep, c_Xh, n, dt_controller)
 
       call this%pc%update()
+
+      if (this%solver_check_pending) then
+         call krylov_check_setup(trim(this%name), this%ksp, Ax, c_Xh, &
+              gs_Xh, this%bclst_ds, .false., pc_type = this%pc_type)
+         this%solver_check_pending = .false.
+      end if
+
       call profiler_start_region(trim(this%name) // '_solve', 21)
       ksp_results = this%ksp%solve(Ax, ds, s_res%x, n, &
            c_Xh, this%bclst_ds, gs_Xh)

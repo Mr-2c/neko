@@ -34,7 +34,8 @@
 module ale_manager
   use num_types, only : rp, dp
   use json_module, only : json_file
-  use json_utils, only : json_get, json_get_or_default, json_extract_item
+  use json_utils, only : json_get, json_get_or_default, json_extract_item, &
+       json_get_or_lookup_or_default
   use field, only : field_t
   use coefs, only : coef_t
   use space, only : space_t
@@ -2251,7 +2252,7 @@ contains
          res_monitor, .false.)
     call json_get_or_default(json, 'case.fluid.ale.solver.max_iterations', &
          ksp_max_iter, 10000)
-    call json_get_or_default(json, 'case.fluid.ale.solver.gmres_space_size', &
+    call json_get_or_lookup_or_default(json, 'case.fluid.ale.solver.gmres_space_size', &
          gmres_space_size, KSP_GMRES_SPACE_SIZE)
 
     if (json%valid_path('case.fluid.ale.solver.output_base_shape')) then

@@ -63,7 +63,8 @@ module PDE_filter
   use sx_jacobi, only : sx_jacobi_t
   use utils, only : neko_error
   use device_math, only : device_cfill, device_subcol3, device_cmult
-  use json_utils, only : json_get, json_get_or_default
+  use json_utils, only : json_get, json_get_or_default, &
+       json_get_or_lookup_or_default
   implicit none
   private
 
@@ -97,6 +98,9 @@ module PDE_filter
      character(len=:), allocatable :: ksp_solver
      ! > preconditioner type
      character(len=:), allocatable :: precon_type_filt
+     !> Whether the start-up check of the solver is still to be made, at the
+     !! first solve
+     logical :: solver_check_pending = .false.
      integer :: ksp_n, n, i
 
 
@@ -130,7 +134,7 @@ contains
     call json_get_or_default(json, "max_iter", max_iter, 200)
     call json_get_or_default(json, "solver", ksp_solver, "cg")
     call json_get_or_default(json, "preconditioner", precon_type, "jacobi")
-    call json_get_or_default(json, "gmres_space_size", this%gmres_space_size, &
+    call json_get_or_lookup_or_default(json, "gmres_space_size", this%gmres_space_size, &
          KSP_GMRES_SPACE_SIZE)
 
     call this%init_from_components(coef, r, tol, max_iter, ksp_solver, &
@@ -176,10 +180,9 @@ contains
          this%precon_type_filt)
 
     ! Check that the operator and preconditioner have the properties the
-    ! chosen Krylov method requires
-    call krylov_check_setup('PDE filter', this%ksp_filt, this%Ax, this%coef, &
-         this%coef%gs_h, this%bclst_filt, .false., &
-         pc_type = this%precon_type_filt)
+    ! chosen Krylov method requires, at the first solve, when the
+    ! coefficients of the operator are those of the actual system
+    this%solver_check_pending = .true.
 
   end subroutine PDE_filter_init_from_components
 
@@ -205,6 +208,7 @@ contains
        deallocate(this%ksp_solver)
     end if
 
+    this%solver_check_pending = .false.
     if (allocated(this%precon_type_filt)) then
        deallocate(this%precon_type_filt)
     end if
@@ -278,6 +282,13 @@ contains
 
     ! set BCs
     call this%bclst_filt%apply_scalar(RHS%x, n)
+
+    if (this%solver_check_pending) then
+       call krylov_check_setup('PDE filter', this%ksp_filt, this%Ax, &
+            this%coef, this%coef%gs_h, this%bclst_filt, .false., &
+            pc_type = this%precon_type_filt)
+       this%solver_check_pending = .false.
+    end if
 
     ! Solve Helmholtz equation
     call profiler_start_region("filter solve")

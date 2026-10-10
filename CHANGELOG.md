@@ -38,6 +38,12 @@
   schedules. Experimental.
 - An MPMD run whose coupled cases do not agree on `variable_timestep` stops
   with an error at setup instead of hanging at the first time step.
+- A variable time step restart continues from the step taken last instead of
+  the placeholder step of one time unit, which set the output counters ahead
+  and skipped the outputs due within a tenth of a time unit after the
+  restart.
+- A statistics sample of zero weight, taken at the start time of the
+  statistics, no longer turns the 3D mean fields into NaN.
 
 ## 1.1.1 [2026-09-08]
 - Fixed the fused three-component Helmholtz operator on the CPU backend

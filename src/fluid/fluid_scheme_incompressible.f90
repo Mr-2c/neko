@@ -296,7 +296,7 @@ contains
        call json_get_or_default(params, &
             'case.fluid.velocity_solver.monitor', &
             logical_val, .false.)
-       call json_get_or_default(params, &
+       call json_get_or_lookup_or_default(params, &
             'case.fluid.velocity_solver.gmres_space_size', &
             gmres_space_size, KSP_GMRES_SPACE_SIZE)
 

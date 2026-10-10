@@ -32,7 +32,7 @@
 !
 !> Implements type time_step_controller.
 module time_step_controller
-  use num_types, only : rp, i8
+  use num_types, only : rp, dp, i8
   use logger, only : neko_log, LOG_SIZE
   use utils, only : neko_error, neko_warning
   use json_module, only : json_file
@@ -90,6 +90,11 @@ module time_step_controller
      integer :: dt_last_change_prev = -1
      !> Whether the step about to be taken is fitted to a scheduled time.
      logical :: dt_fitted = .false.
+     !> The step kept in between the scheduled times. The last step up to a
+     !! scheduled time absorbs the round-off of the time and may differ from
+     !! it in the last bits; the steps after it go on from this one, so that
+     !! the round-off does not build up from one interval to the next.
+     real(kind=rp) :: dt_nominal = 0.0_rp
      !> The step planned after the one about to be taken, when the fit
      !! changes the step in two stages, and the time it lands on.
      real(kind=rp) :: dt_plateau = 0.0_rp
@@ -135,7 +140,20 @@ contains
     type(json_file), intent(inout) :: params
     integer :: flags_any(2), flags_all(2), ierr
 
+    ! Reset the state of the controller and of the landing
     this%dt_last_change = -1
+    this%dt_last_change_prev = -1
+    this%cfl_avg = 0.0_rp
+    this%dt_previous = 0.0_rp
+    this%cfl_previous = 0.0_rp
+    this%dt_fitted = .false.
+    this%dt_nominal = 0.0_rp
+    this%dt_plateau = 0.0_rp
+    this%plateau_target = huge(0.0_rp)
+    this%held_steps = 0
+    this%held_by_ratio = .false.
+    this%skipped_for_end = huge(0.0_rp)
+    this%landing_target = huge(0.0_rp)
     call json_get_or_default(params, 'variable_timestep', &
          this%is_variable_dt, .false.)
     if (this%is_variable_dt) then
@@ -165,6 +183,10 @@ contains
     ! the CFL controller. With a fixed step it only checks the schedules.
     call json_get_or_default(params, 'exact_output_time', &
          this%exact_output_time, .false.)
+    ! The tolerances of the landing are set for double precision times
+    if (this%exact_output_time .and. rp .ne. dp) then
+       call neko_error('exact_output_time requires a double precision build')
+    end if
     if (this%exact_output_time .and. .not. this%is_variable_dt) then
        call neko_warning('exact_output_time with a fixed timestep only &
        &checks that the sampling and output times are whole numbers &
@@ -418,6 +440,7 @@ contains
     real(kind=rp), intent(in) :: time_to_next
     real(kind=rp) :: dt_prev, dt_new, direction, remaining, global_min_dt
     real(kind=rp) :: lo, hi, remaining_end, target_time, nearest, plateau, x
+    real(kind=rp) :: tol, dt_base
     character(len=LOG_SIZE) :: log_buf
     integer :: ierr
     logical :: reachable, fitted, changed, on_end, ratio_bound, step_changed
@@ -429,8 +452,13 @@ contains
        if (time_to_next .lt. huge(0.0_rp) .and. abs(time%dt) .gt. 0.0_rp) &
             then
           x = time_to_next / abs(time%dt)
+          ! The time is accumulated step by step, so it carries a
+          ! round-off of up to half an ulp of the time per step taken
+          tol = real(max(time%tstep, 1), rp) * epsilon(1.0_rp) * &
+               abs(time%t) / abs(time%dt)
+          tol = min(max(tol, LANDING_TOL), 1.0e-2_rp)
           if (x .lt. MAX_LANDING_STEPS) then
-             if (abs(x - real(nint(x, kind = i8), rp)) .gt. LANDING_TOL) then
+             if (abs(x - real(nint(x, kind = i8), rp)) .gt. tol) then
                 write(log_buf, '(A,E15.7,A,F0.3,A)') 'The scheduled time ', &
                      time%t + sign(1.0_rp, time%dt) * time_to_next, ' is ', &
                      x, ' steps away'
@@ -495,7 +523,14 @@ contains
        ! anew absorbs the round-off of the accumulated time, so the last
        ! step lands exactly.
        if (.not. changed) then
-          call keep_step(remaining, dt_prev, dt_new, fitted)
+          ! The step to keep: the nominal one, unless the step taken last
+          ! differs from it by more than the round-off it may absorb
+          dt_base = dt_prev
+          if (this%dt_nominal .gt. 0.0_rp .and. &
+               abs(this%dt_nominal - dt_prev) .le. LANDING_TOL * dt_prev) then
+             dt_base = this%dt_nominal
+          end if
+          call keep_step(remaining, dt_base, dt_new, fitted)
           if (.not. fitted .and. &
                this%dt_plateau .ge. lo * (1.0_rp - LANDING_TOL) .and. &
                this%dt_plateau .le. hi * (1.0_rp + LANDING_TOL) .and. &
@@ -524,6 +559,13 @@ contains
 
     time%dt = direction * dt_new
     this%dt_fitted = fitted
+    ! The nominal step goes on through the last step up to a scheduled time,
+    ! which only absorbs the round-off
+    if (.not. (fitted .and. &
+         abs(remaining - dt_new) .le. LANDING_TOL * dt_new .and. &
+         abs(this%dt_nominal - dt_new) .le. LANDING_TOL * dt_new)) then
+       this%dt_nominal = dt_new
+    end if
     this%dt_plateau = 0.0_rp
     this%plateau_target = huge(0.0_rp)
     if (fitted .and. abs(plateau - dt_new) .gt. LANDING_TOL * dt_new) then
@@ -588,9 +630,12 @@ contains
   end subroutine time_step_controller_land
 
   !> Keep the step if it divides the remaining time up to the scheduled
-  !! time, dividing it anew to absorb round-off.
+  !! time. The step is kept bit for bit while it divides it to well within
+  !! LANDING_TOL, so that the time scheme and the flow rate forcing do not
+  !! see a change at every step, and the last step up to the scheduled time
+  !! absorbs the round-off. Otherwise the remaining time is divided anew.
   !! @param remaining The time up to the scheduled time.
-  !! @param dt_prev The step taken last.
+  !! @param dt_prev The step to keep, the nominal step or the one taken last.
   !! @param dt_new The step to take, set if the step is kept.
   !! @param kept Whether the step is kept.
   pure subroutine keep_step(remaining, dt_prev, dt_new, kept)
@@ -605,7 +650,15 @@ contains
     if (x .ge. MAX_LANDING_STEPS) return
     n = nint(x, kind = i8)
     if (n .ge. 1_i8 .and. abs(x - real(n, rp)) .le. LANDING_TOL) then
-       dt_new = remaining / real(n, rp)
+       if (n .eq. 1_i8) then
+          dt_new = remaining
+       else if (abs(x - real(n, rp)) .le. 0.1_rp * LANDING_TOL) then
+          ! Close enough that the last step absorbs less than a tenth of
+          ! LANDING_TOL of a step, so it is not registered as a change
+          dt_new = dt_prev
+       else
+          dt_new = remaining / real(n, rp)
+       end if
        kept = .true.
     end if
 

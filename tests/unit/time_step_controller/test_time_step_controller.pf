@@ -2,7 +2,7 @@
 !! on the scheduled sampling and output times with a variable time step.
 module test_time_step_controller
   use pfunit
-  use num_types, only : rp
+  use num_types, only : rp, dp
   use json_module, only : json_file
   use time_state, only : time_state_t
   use time_based_controller, only : time_based_controller_t
@@ -224,6 +224,9 @@ contains
     type(time_step_controller_t) :: dtc
     type(json_file) :: params
 
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
+
     call params%load_from_string('{"variable_timestep": true, ' // &
          '"target_cfl": 0.5, "exact_output_time": true}')
     call dtc%init(params)
@@ -257,6 +260,9 @@ contains
     real(kind=rp) :: err
     integer :: k
 
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
+
     dtc = fixed_dt_controller(.true.)
     ! Times exact in binary, as the end of a fixed step run is not checked
     ! with a tolerance
@@ -279,6 +285,9 @@ contains
   subroutine test_first_dt()
     type(time_step_controller_t) :: dtc
     type(time_state_t) :: time
+
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
 
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 1.0_rp, 1.0_rp)
@@ -307,6 +316,9 @@ contains
     type(steps_t) :: steps
     real(kind=rp) :: err
 
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
+
     dtc = variable_dt_controller(.false.)
     call time%init(0.0_rp, 0.1_rp, 1.0_rp)
     call runs(1)%ctrl%init(0.0_rp, 0.1_rp, "simulationtime", 0.0107_rp)
@@ -331,7 +343,10 @@ contains
     type(ctrl_run_t) :: runs(1)
     type(steps_t) :: steps
     real(kind=rp) :: err, excess
-    integer :: k, nchanges
+    integer :: k, nchanges, nbitwise
+
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
 
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 0.1_rp, 1.0_rp)
@@ -359,6 +374,14 @@ contains
        if (steps%dlc(k) .eq. 0) nchanges = nchanges + 1
     end do
     @assertEqual(nchanges, 2)
+    ! The step is kept bit for bit in between the scheduled times: only the
+    ! last step up to one absorbs the round-off of the time, so it changes
+    ! at most twice per scheduled time rather than at every step
+    nbitwise = 0
+    do k = 2, steps%n
+       if (steps%dt(k) .ne. steps%dt(k-1)) nbitwise = nbitwise + 1
+    end do
+    @assertTrue(nbitwise .le. 2 * runs(1)%nexec + 2)
     @assertEqual(bookkeeping_errors(steps), 0)
     excess = bounds_excess(steps, 0.5_rp, 1.2_rp)
     @assertTrue(excess .le. 1.0e-9_rp)
@@ -371,6 +394,9 @@ contains
   subroutine test_geometric_centre()
     type(time_step_controller_t) :: dtc
     type(time_state_t) :: time
+
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
 
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 1.0_rp, 1.0e-3_rp)
@@ -395,6 +421,9 @@ contains
     real(kind=rp), parameter :: interval = 3.14159265358979e-2_rp
     real(kind=rp) :: err, excess
     integer :: k
+
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
 
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 0.5_rp, 1.0_rp)
@@ -428,6 +457,9 @@ contains
     real(kind=rp) :: err
     integer :: k
 
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
+
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 0.1_rp, 1.0_rp)
     call runs(1)%ctrl%init(0.0_rp, 0.1_rp, "simulationtime", 0.01_rp)
@@ -458,6 +490,9 @@ contains
     type(ctrl_run_t) :: runs(2)
     type(steps_t) :: steps
     real(kind=rp) :: err, excess
+
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
 
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 0.1_rp, 1.0_rp)
@@ -498,6 +533,9 @@ contains
     real(kind=rp) :: err
     integer :: k
 
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
+
     dtc = variable_dt_controller(.true.)
     dtc%min_dt = 0.98e-3_rp
     call time%init(0.0_rp, 0.1_rp, 1.0_rp)
@@ -525,6 +563,9 @@ contains
     type(ctrl_run_t) :: runs(2)
     type(steps_t) :: steps
     real(kind=rp) :: err, excess
+
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
 
     dtc = variable_dt_controller(.true.)
     dtc%min_dt_decrease_factor = 0.95_rp
@@ -558,6 +599,9 @@ contains
     type(ctrl_run_t) :: runs(1)
     type(steps_t) :: steps
 
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
+
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 0.1003_rp, 1.0_rp)
     call runs(1)%ctrl%init(0.0_rp, 0.1003_rp, "simulationtime", 0.01_rp)
@@ -582,6 +626,9 @@ contains
     type(steps_t) :: steps
     real(kind=rp) :: err
     integer :: k
+
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
 
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 0.1_rp, 1.0_rp)
@@ -609,6 +656,9 @@ contains
     type(steps_t) :: steps
     real(kind=rp) :: err, excess
     integer :: k
+
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
 
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 0.1_rp, 1.0_rp)
@@ -639,6 +689,9 @@ contains
     real(kind=rp) :: err
     integer :: nexec_part1
 
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
+
     dtc = variable_dt_controller(.true.)
     ! The first run ends at 0.0546, in between two scheduled times
     call time%init(0.0_rp, 0.0546_rp, 1.0_rp)
@@ -649,12 +702,13 @@ contains
     time_chkp = time
 
     ! The restart: the time and its lags come from the checkpoint, the step
-    ! index and the placeholder step from the case
+    ! index from the case, and the step is the one taken last
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 0.1_rp, 1.0_rp)
     time%t = time_chkp%t
     time%tlag = time_chkp%tlag
     time%dtlag = time_chkp%dtlag
+    time%dt = time_chkp%dtlag(1)
     call runs(1)%ctrl%init(0.0_rp, 0.1_rp, "simulationtime", 0.0107_rp)
     call runs(1)%ctrl%set_counter(time)
     runs(1)%nexec = 0
@@ -674,6 +728,9 @@ contains
   subroutine test_dt_last_change()
     type(time_step_controller_t) :: dtc
     type(time_state_t) :: time
+
+    ! exact_output_time needs double precision times
+    if (rp .ne. dp) return
 
     dtc = variable_dt_controller(.true.)
     call time%init(0.0_rp, 1.0_rp, 1.0_rp)

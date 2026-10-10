@@ -489,7 +489,6 @@ contains
 
     call avg_planes%free()
     call avg_planes%init(this%n_gll_lvls, field_list%size() + 1)
-    avg_planes = 0.0_rp
 
     n = this%dof%size()
     do j = 2, field_list%size() + 1
@@ -518,7 +517,6 @@ contains
 
     call avg_planes%free()
     call avg_planes%init(this%n_gll_lvls, size(vector_ptr) + 1)
-    avg_planes = 0.0_rp
 
     n = this%dof%size()
     do j = 2, size(vector_ptr) + 1

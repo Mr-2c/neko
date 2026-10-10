@@ -62,20 +62,6 @@
           "else": {
             "required": ["timestep"]
           }
-        },
-        {
-          "if": {
-            "properties": {
-              "exact_output_time": {"const": true}
-            },
-            "required": ["exact_output_time"]
-          },
-          "then": {
-            "properties": {
-              "variable_timestep": {"const": true}
-            },
-            "required": ["variable_timestep"]
-          }
         }
       ],
       "additionalProperties": false

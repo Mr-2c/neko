@@ -119,6 +119,10 @@ contains
     class(mean_field_t), intent(inout) :: this
     real(kind=rp), intent(in) :: k
 
+    ! A sample of no weight leaves the mean as it is, and would give 0/0 for
+    ! the first sample (a sample taken at the start time of the statistics)
+    if (.not. k .gt. 0.0_rp) return
+
     ! mf = (time * mf + k * f) / (time + k), keeping a constant field
     ! exactly constant.
     call field_cmult(this%mf, this%time, size(this%mf%x))

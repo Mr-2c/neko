@@ -309,9 +309,22 @@ contains
     type(chkp_t), intent(inout) :: chkp
     character(len=LOG_SIZE) :: log_buf
     integer :: i
+    logical :: variable_dt
 
     ! Restart the time state and BDF coefficients
     call chkp%set_time_state(C%time)
+
+    ! With a variable time step, the step of the case is a placeholder of
+    ! one time unit. Continue from the step taken last instead, so that the
+    ! output counters set below, and the outputs checked before the first
+    ! step, use a tolerance of a tenth of an actual step. The first step is
+    ! computed from the CFL number, which scales with the step, so it is
+    ! unchanged.
+    call json_get_or_default(C%params, 'case.time.variable_timestep', &
+         variable_dt, .false.)
+    if (variable_dt .and. abs(C%time%dtlag(1)) .gt. 0.0_rp) then
+       C%time%dt = C%time%dtlag(1)
+    end if
     do i = 1, size(C%time%dtlag)
        call C%fluid%ext_bdf%set_coeffs(C%time%dtlag)
     end do

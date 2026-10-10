@@ -446,9 +446,9 @@ contains
     call json_get_or_default(params, &
          'solver.monitor', &
          logical_val, .false.)
-    call json_get_or_default(params, 'solver.gmres_space_size', &
+    call json_get_or_lookup_or_default(params, 'solver.gmres_space_size', &
          gmres_space_size, KSP_GMRES_SPACE_SIZE)
-    call json_get_or_default(params, 'solver.residual_check_interval', &
+    call json_get_or_lookup_or_default(params, 'solver.residual_check_interval', &
          this%residual_check_interval, 0)
     if (trim(solver_type) .eq. 'gmres') then
        write(log_buf, '(A,I0)') 'GMRES space: ', gmres_space_size
