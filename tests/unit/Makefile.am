@@ -92,6 +92,7 @@ EXTRA_DIST = \
 	quad/test_quad.pf\
 	gather_scatter/test_gather_scatter_parallel.pf\
 	krylov/test_krylov.pf\
+	krylov/test_krylov_check.pf\
 	hex/test_hex.pf\
 	tet/test_tet.pf\
 	tri/test_tri.pf\

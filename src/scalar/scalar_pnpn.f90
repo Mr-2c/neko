@@ -50,6 +50,8 @@ module scalar_pnpn
   use field_series, only : field_series_t
   use facet_normal, only : facet_normal_t
   use krylov, only : ksp_monitor_t
+  use krylov_check, only : krylov_check_setup, krylov_check_residual, &
+       krylov_check_due
   use device_math, only : device_add2s2, device_col2
   use time_scheme_controller, only : time_scheme_controller_t
   use projection, only : projection_t
@@ -184,6 +186,7 @@ contains
     class(bc_t), pointer :: bc_i
     character(len=15), parameter :: scheme = 'Modular (Pn/Pn)'
     logical :: advection
+    character(len=:), allocatable :: precon_type
 
     call this%free()
 
@@ -255,6 +258,12 @@ contains
          ulag, vlag, wlag, this%chkp%dtlag, &
          this%chkp%tlag, time_scheme, .not. advection, &
          this%slag)
+
+    ! Check that the operator and preconditioner have the properties the
+    ! chosen Krylov method requires
+    call json_get(params, 'solver.preconditioner.type', precon_type)
+    call krylov_check_setup(trim(this%name), this%ksp, this%ax, this%c_Xh, &
+         this%gs_Xh, this%bclst_ds, .false., pc_type = precon_type)
   end subroutine scalar_pnpn_init
 
   ! Restarts the scalar from a checkpoint
@@ -431,6 +440,10 @@ contains
       ksp_results = this%ksp%solve(Ax, ds, s_res%x, n, &
            c_Xh, this%bclst_ds, gs_Xh)
       ksp_results%name = trim(this%name)
+      if (krylov_check_due(tstep, this%residual_check_interval)) then
+         call krylov_check_residual(trim(this%name), Ax, ds, s_res, c_Xh, &
+              gs_Xh, this%bclst_ds, ksp_results, this%ksp%abs_tol)
+      end if
       call profiler_end_region(trim(this%name) // '_solve', 21)
 
       call this%proj_s%post_solving(ds%x, Ax, c_Xh, this%bclst_ds, gs_Xh, &

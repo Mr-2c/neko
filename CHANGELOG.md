@@ -25,6 +25,11 @@
   node orderings are found once at initialisation from the geometry, and each
   output is one pass over the fields and one exchange of the column sums. The
   mesh must be stacked in the averaging direction, with aligned columns.
+- Added `gmres_space_size` to the linear solver blocks, the Krylov space
+  size of `gmres` (default 30).
+- Added a start-up check of each linear solver's operator and preconditioner
+  that warns on incompatible pairings, and `residual_check_interval` to
+  compare the true with the reported residual.
 
 ## 1.1.1 [2026-09-08]
 - Fixed the fused three-component Helmholtz operator on the CPU backend
